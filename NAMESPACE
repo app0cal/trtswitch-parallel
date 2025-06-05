@@ -1,0 +1,5 @@
+useDynLib(trtswitch, .registration = TRUE)
+import(Rcpp)
+export(rpsftm)
+export(rpsftmcpp)
+export(rpsftm_parallelcpp)

@@ -1,20 +1,24 @@
 {
-    "configurations": [
-      {
-        "name": "Win32",
-        "includePath": [
-          "${workspaceFolder}/src",
-          "${workspaceFolder}/**",
-          "C:/Program Files/mingw-w64/x86_64-12.2.0-posix-seh-rt_v10-rev2/mingw64/include",      // change to match your compiler path
-          "C:/Program Files/mingw-w64/x86_64-12.2.0-posix-seh-rt_v10-rev2/mingw64/x86_64-w64-mingw32/include", // also this one
-          "C:/Program Files/mingw-w64/x86_64-12.2.0-posix-seh-rt_v10-rev2/mingw64/lib/gcc/x86_64-w64-mingw32/12.2.0/include"
-        ],
-        "defines": [],
-        "compilerPath": "C:/Program Files/mingw-w64/bin/g++.exe",  // Adjust to your real path
-        "cStandard": "c11",
-        "cppStandard": "c++17",
-        "intelliSenseMode": "windows-gcc-x64"
-      }
-    ],
-    "version": 4
-  }
+  "configurations": [
+    {
+      "name": "Win32",
+      "includePath": [
+        "${workspaceFolder}/src",                             // your own headers
+        "C:/mingw64/include",                                 // MinGW–w64’s top‐level include
+        "C:/mingw64/x86_64-w64-mingw32/include",              // MinGW–w64 target include
+        "C:/mingw64/lib/gcc/x86_64-w64-mingw32/15.1.0/include",// GCC’s C++ stdlib headers (version 15.1.0)
+        "C:/rtools45/usr/include",                            // Rtools 4.5 C headers
+        "C:/PROGRA~1/R/R-45~1.0/include",                      // R’s own include/ (R 4.5.0)
+        "C:/Users/marco/AppData/Local/R/win-library/4.5/Rcpp/include",        // Rcpp’s headers
+        "C:/Users/marco/AppData/Local/R/win-library/4.5/RcppParallel/include", // (if you use RcppParallel)
+        "C:/Users/marco/vcpkg/installed/x64-windows/include"
+      ],
+      "defines": [],
+      "compilerPath": "C:/mingw64/bin/g++.exe",  // your new MinGW‐w64 compiler
+      "cStandard":   "c11",
+      "cppStandard": "c++17",
+      "intelliSenseMode": "windows-gcc-x64"
+    }
+  ],
+  "version": 4
+}

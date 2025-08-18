@@ -53,13 +53,11 @@ using namespace Rcpp;
 //'   survival time.
 //' @param milestone The milestone to calculate restricted mean survival 
 //'   time.
-//' @param swtrt_control_only Whether treatment switching occurred only in
-//'   the control group.
 //' @param outputRawDataset Whether to output the raw data set.
 //' @param seed The seed to reproduce the simulation results.
 //'   The seed from the environment will be used if left unspecified.
 //'
-//' @return A list with three data frames.
+//' @return A list with two data frames.
 //' 
 //' * \code{sumdata}: A summary data frame with the following variables:
 //'
@@ -88,35 +86,11 @@ using namespace Rcpp;
 //'     - \code{simtrue_cox_hr}: The treatment hazard ratio from the Cox 
 //'       model without adjusting for baseline prognosis.
 //'
-//' * \code{adsldata}: A subject-level data frame containing one record 
-//'   per subject with the following variables:
+//'     - \code{simtrue_aftwbprog_af}: The average acceleration factor from 
+//'       the Weibull AFT model adjusting for baseline prognosis.
 //'
-//'     - \code{id}: The subject ID.
-//'
-//'     - \code{trtrand}: The randomized treatment arm.
-//'
-//'     - \code{bprog}: Whether the patient had poor baseline prognosis. 
-//'     
-//'     - \code{timeOS}: The observed survival time.
-//'     
-//'     - \code{died}: Whether the patient died. 
-//'     
-//'     - \code{progressed}: Whether the patient had disease progression. 
-//'     
-//'     - \code{timePFSobs}: The observed time of disease progression at 
-//'       regular scheduled visits.
-//'       
-//'     - \code{catevent}: Whether the patient developed metastatic disease.
-//'     
-//'     - \code{cattime}: When the patient developed metastatic disease.
-//'     
-//'     - \code{xo}: Whether the patient switched treatment. 
-//'     
-//'     - \code{xotime}: When the patient switched treatment.
-//'     
-//'     - \code{xotime_upper}: The upper bound of treatment switching time.
-//'     
-//'     - \code{censor_time}: The administrative censoring time.
+//'     - \code{simtrue_aft_af}: The average acceleration factor from 
+//'       the Weibull AFT model without adjusting for baseline prognosis.
 //'
 //' * \code{paneldata}: A counting process style subject-level data frame 
 //'   with the following variables:
@@ -131,7 +105,11 @@ using namespace Rcpp;
 //'     
 //'     - \code{tstop}: The right end of time interval.
 //'     
-//'     - \code{died}: Whether the patient died. 
+//'     - \code{event}: Whether the patient died at the end of the interval. 
+//'     
+//'     - \code{timeOS}: The observed survival time.
+//'     
+//'     - \code{died}: Whether the patient died during the study. 
 //'     
 //'     - \code{progressed}: Whether the patient had disease progression. 
 //'     
@@ -172,7 +150,7 @@ using namespace Rcpp;
 //' sim1 <- tsegestsim(
 //'   n = 500, allocation1 = 2, allocation2 = 1, pbprog = 0.5, 
 //'   trtlghr = -0.5, bprogsl = 0.3, shape1 = 1.8, 
-//'   scale1 = 0.000025, shape2 = 1.7, scale2 = 0.000015, 
+//'   scale1 = 360, shape2 = 1.7, scale2 = 688, 
 //'   pmix = 0.5, admin = 5000, pcatnotrtbprog = 0.5, 
 //'   pcattrtbprog = 0.25, pcatnotrt = 0.2, pcattrt = 0.1, 
 //'   catmult = 0.5, tdxo = 1, ppoor = 0.1, pgood = 0.04, 
@@ -188,9 +166,9 @@ List tsegestsim(const int n = 500,
                 const double trtlghr = -0.5,
                 const double bprogsl = 0.3,
                 const double shape1 = 1.8,
-                const double scale1 = 0.000025,
+                const double scale1 = 360,
                 const double shape2 = 1.7,
-                const double scale2 = 0.000015,
+                const double scale2 = 688,
                 const double pmix = 0.5,
                 const double admin = 5000,
                 const double pcatnotrtbprog = 0.5,
@@ -205,7 +183,6 @@ List tsegestsim(const int n = 500,
                 const double pgoodmet = 0.2,
                 const double xomult = 1.4188308,
                 const double milestone = 546,
-                const bool swtrt_control_only = 1,
                 const bool outputRawDataset = 1,
                 const int seed = NA_INTEGER) {
   
@@ -217,8 +194,8 @@ List tsegestsim(const int n = 500,
 
   // survival function of the Weibull mixture
   auto S = [shape1, scale1, shape2, scale2, pmix](double t)->double {
-    double a1 = pmix*exp(-scale1*pow(t,shape1));
-    double a2 = (1-pmix)*exp(-scale2*pow(t,shape2));
+    double a1 = pmix*exp(-pow(t/scale1,shape1));
+    double a2 = (1-pmix)*exp(-pow(t/scale2,shape2));
     return a1+a2;
   };
 
@@ -226,6 +203,7 @@ List tsegestsim(const int n = 500,
   double simtrueconstmean, simtrueconstlb, simtrueconstub, simtrueconstse;
   double simtrueexpstmean, simtrueexpstlb, simtrueexpstub, simtrueexpstse;
   double simtrue_coxwbprog_hr, simtrue_cox_hr;
+  double simtrue_aftwbprog_af, simtrue_aft_af;
 
   IntegerVector id(n), trtrand(n), bprog(n), dead(n), progressed(n);
   NumericVector timeOS(n), timeOS5(n);
@@ -384,20 +362,39 @@ List tsegestsim(const int n = 500,
   StringVector covariates(2);
   covariates[0] = "trtrand";
   covariates[1] = "bprog";
-
+  
+  NumericVector init(1, NA_REAL);
   List a3 = phregcpp(a1, "", "", "time", "", "event", covariates,
-                     "", "", "", "efron", 0, 0, 0, 0, 0, 0.05, 50, 1.0e-9);
+                     "", "", "", "efron", init, 
+                     0, 0, 0, 0, 0, 0.05, 50, 1.0e-9);
   DataFrame parest = DataFrame(a3["parest"]);
   NumericVector beta = parest["beta"];
   simtrue_coxwbprog_hr = exp(beta[0]);
 
   // HR without bprog
   a3 = phregcpp(a1, "", "", "time", "", "event", "trtrand",
-                "", "", "", "efron", 0, 0, 0, 0, 0, 0.05, 50, 1.0e-9);
+                "", "", "", "efron", init, 
+                0, 0, 0, 0, 0, 0.05, 50, 1.0e-9);
   parest = DataFrame(a3["parest"]);
   beta = parest["beta"];
   simtrue_cox_hr = exp(beta[0]);
+  
+  // acceleration factor from AFT with bprog
+  List a4 = liferegcpp(a1, "", "", "time", "", "event", covariates,
+                       "", "", "", "weibull", init, 
+                       0, 0, 0.05, 50, 1.0e-9);
+  parest = DataFrame(a4["parest"]);
+  beta = parest["beta"];
+  simtrue_aftwbprog_af = exp(beta[1]);
 
+  // acceleration factor from AFT without bprog
+  List a5 = liferegcpp(a1, "", "", "time", "", "event", "trtrand",
+                       "", "", "", "weibull", init, 
+                       0, 0, 0.05, 50, 1.0e-9);
+  parest = DataFrame(a5["parest"]);
+  beta = parest["beta"];
+  simtrue_aft_af = exp(beta[1]);
+  
   // apply switch and effect
   IntegerVector xo1(n, NA_INTEGER), xo2(n, NA_INTEGER), xo3(n, NA_INTEGER);
   IntegerVector xo4(n, NA_INTEGER), xo5(n, NA_INTEGER), xo6(n, NA_INTEGER);
@@ -463,78 +460,41 @@ List tsegestsim(const int n = 500,
     }
 
     // generate the indicator and time of treatment switching
-    if (swtrt_control_only) {
-      if (trtrand[i] == 0 &&
-          timeOS[i] > timePFSobs[i] && progressed[i] == 1) {
-        xo1[i] = static_cast<int>(R::rbinom(1, p1));
-      }
-      
-      if (trtrand[i] == 0 && xo1[i] == 0 &&
-          timeOS[i] > timePFSobs[i] + 21 && progressed[i] == 1 && 
-          tdxo == 1) {
-        xo2[i] = static_cast<int>(R::rbinom(1, p2));
-      }
-      
-      if (trtrand[i] == 0 && xo1[i] == 0 && xo2[i] == 0 &&
-          timeOS[i] > timePFSobs[i] + 42 && progressed[i] == 1 && 
-          tdxo == 1) {
-        xo3[i] = static_cast<int>(R::rbinom(1, p3));
-      }
-      
-      if (trtrand[i] == 0 && xo1[i] == 0 && xo2[i] == 0 && xo3[i] == 0 &&
-          timeOS[i] > timePFSobs[i] + 63 && progressed[i] == 1 && 
-          tdxo == 1) {
-        xo4[i] = static_cast<int>(R::rbinom(1, p4));
-      }
-      
-      if (trtrand[i] == 0 && xo1[i] == 0 && xo2[i] == 0 && xo3[i] == 0 &&
-          xo4[i] == 0 &&
-          timeOS[i] > timePFSobs[i] + 84 && progressed[i] == 1 && 
-          tdxo == 1) {
-        xo5[i] = static_cast<int>(R::rbinom(1, p5));
-      }
-      
-      if (trtrand[i] == 0 && xo1[i] == 0 && xo2[i] == 0 && xo3[i] == 0 &&
-          xo4[i] == 0 && xo5[i] == 0 &&
-          timeOS[i] > timePFSobs[i] + 105 && progressed[i] == 1 && 
-          tdxo == 1) {
-        xo6[i] = static_cast<int>(R::rbinom(1, p6));
-      }
-    } else {
-      if (timeOS[i] > timePFSobs[i] && progressed[i] == 1) {
-        xo1[i] = static_cast<int>(R::rbinom(1, p1));
-      }
-      
-      if (xo1[i] == 0 &&
-          timeOS[i] > timePFSobs[i] + 21 && progressed[i] == 1 && 
-          tdxo == 1) {
-        xo2[i] = static_cast<int>(R::rbinom(1, p2));
-      }
-      
-      if (xo1[i] == 0 && xo2[i] == 0 &&
-          timeOS[i] > timePFSobs[i] + 42 && progressed[i] == 1 && 
-          tdxo == 1) {
-        xo3[i] = static_cast<int>(R::rbinom(1, p3));
-      }
-      
-      if (xo1[i] == 0 && xo2[i] == 0 && xo3[i] == 0 &&
-          timeOS[i] > timePFSobs[i] + 63 && progressed[i] == 1 && 
-          tdxo == 1) {
-        xo4[i] = static_cast<int>(R::rbinom(1, p4));
-      }
-      
-      if (xo1[i] == 0 && xo2[i] == 0 && xo3[i] == 0 && xo4[i] == 0 &&
-          timeOS[i] > timePFSobs[i] + 84 && progressed[i] == 1 && 
-          tdxo == 1) {
-        xo5[i] = static_cast<int>(R::rbinom(1, p5));
-      }
-      
-      if (xo1[i] == 0 && xo2[i] == 0 && xo3[i] == 0 && xo4[i] == 0 && 
-          xo5[i] == 0 &&
-          timeOS[i] > timePFSobs[i] + 105 && progressed[i] == 1 && 
-          tdxo == 1) {
-        xo6[i] = static_cast<int>(R::rbinom(1, p6));
-      }
+    if (trtrand[i] == 0 &&
+        timeOS[i] > timePFSobs[i] && progressed[i] == 1) {
+      xo1[i] = static_cast<int>(R::rbinom(1, p1));
+    }
+    
+    if (trtrand[i] == 0 && xo1[i] == 0 &&
+        timeOS[i] > timePFSobs[i] + 21 && progressed[i] == 1 && 
+        tdxo == 1) {
+      xo2[i] = static_cast<int>(R::rbinom(1, p2));
+    }
+    
+    if (trtrand[i] == 0 && xo1[i] == 0 && xo2[i] == 0 &&
+        timeOS[i] > timePFSobs[i] + 42 && progressed[i] == 1 && 
+        tdxo == 1) {
+      xo3[i] = static_cast<int>(R::rbinom(1, p3));
+    }
+    
+    if (trtrand[i] == 0 && xo1[i] == 0 && xo2[i] == 0 && xo3[i] == 0 &&
+        timeOS[i] > timePFSobs[i] + 63 && progressed[i] == 1 && 
+        tdxo == 1) {
+      xo4[i] = static_cast<int>(R::rbinom(1, p4));
+    }
+    
+    if (trtrand[i] == 0 && xo1[i] == 0 && xo2[i] == 0 && xo3[i] == 0 &&
+        xo4[i] == 0 &&
+        timeOS[i] > timePFSobs[i] + 84 && progressed[i] == 1 && 
+        tdxo == 1) {
+      xo5[i] = static_cast<int>(R::rbinom(1, p5));
+    }
+    
+    if (trtrand[i] == 0 && xo1[i] == 0 && xo2[i] == 0 && xo3[i] == 0 &&
+        xo4[i] == 0 && xo5[i] == 0 &&
+        timeOS[i] > timePFSobs[i] + 105 && progressed[i] == 1 && 
+        tdxo == 1) {
+      xo6[i] = static_cast<int>(R::rbinom(1, p6));
     }
 
     if (xo1[i] == 1) xotime[i] = timePFSobs[i];
@@ -563,18 +523,6 @@ List tsegestsim(const int n = 500,
     
     if (trtrand[i] == 0 && xo[i] == 1 && bprog[i] == 0 && xoprecat[i] == 1) {
       probcat[i] = pcattrt;
-    }
-    
-    if (!swtrt_control_only) { // active switched to control
-      if (trtrand[i] == 1 && xo[i] == 1 && bprog[i] == 1 && 
-          xoprecat[i] == 1) {
-        probcat[i] = pcatnotrtbprog;
-      }
-      
-      if (trtrand[i] == 1 && xo[i] == 1 && bprog[i] == 0 && 
-          xoprecat[i] == 1) {
-        probcat[i] = pcatnotrt;
-      }
     }
     
     // regenerate metastatic disease status after treatment switching
@@ -791,14 +739,6 @@ List tsegestsim(const int n = 500,
       xoOSgainobs[i] = std::round(xoOSgainobs[i]*xomult);
     }
     
-    if (!swtrt_control_only) {
-      if (trtrand[i] == 1 && xo[i] == 1) { 
-        // crossover to control shortens remaining survival time
-        xoOSgainobs[i] = timeOS[i] - xotime[i];
-        xoOSgainobs[i] = std::round(xoOSgainobs[i]/xomult);
-      }
-    }
-    
     timeOS2[i] = xo[i] == 1 ? xoOSgainobs[i] + xotime[i] : timeOS[i];
     
     // apply chance of catastrophic event for xo patients who now live past
@@ -969,6 +909,8 @@ List tsegestsim(const int n = 500,
   IntegerVector died2 = died[q2];
   died2[censor == 1] = 0;
   
+  NumericVector timeOS8 = timeOS2[q2];
+  IntegerVector died8 = died[q2];
   IntegerVector progressed2 = progressed[q2];
   NumericVector timePFSobs2 = timePFSobs[q2];
   IntegerVector catevent2 = catevent[q2];
@@ -1025,31 +967,20 @@ List tsegestsim(const int n = 500,
     Named("simtrueexpstub") = simtrueexpstub,
     Named("simtrueexpstse") = simtrueexpstse,
     Named("simtrue_coxwbprog_hr") = simtrue_coxwbprog_hr,
-    Named("simtrue_cox_hr") = simtrue_cox_hr);
+    Named("simtrue_cox_hr") = simtrue_cox_hr,
+    Named("simtrue_aftwbprog_af") = simtrue_aftwbprog_af,
+    Named("simtrue_aft_af") = simtrue_aft_af);
   
   if (outputRawDataset) {
-    DataFrame adsldata = DataFrame::create(
-      Named("id") = id,
-      Named("trtrand") = trtrand,
-      Named("bprog") = bprog,
-      Named("timeOS") = timeOS2,
-      Named("died") = died,
-      Named("progressed") = progressed,
-      Named("timePFSobs") = timePFSobs,
-      Named("catevent") = catevent,
-      Named("cattime") = cattime,
-      Named("xo") = xo,
-      Named("xotime") = xotime,
-      Named("xoime_upper") = xotime_upper,
-      Named("censor_time") = admin);
-    
     DataFrame paneldata = DataFrame::create(
       Named("id") = id2,
       Named("trtrand") = trtrand2,
       Named("bprog") = bprog2,
       Named("tstart") = tstart,
       Named("tstop") = tstop,
-      Named("died") = died2,
+      Named("event") = died2,
+      Named("timeOS") = timeOS8,
+      Named("died") = died8,
       Named("progressed") = progressed2,
       Named("timePFSobs") = timePFSobs2,
       Named("progtdc") = progtdc,
@@ -1064,7 +995,6 @@ List tsegestsim(const int n = 500,
       Named("censor_time") = admin);
     
     result = List::create(Named("sumstat") = sumstat,
-                          Named("adsldata") = adsldata,
                           Named("paneldata") = paneldata);
   } else {
     result = List::create(Named("sumstat") = sumstat);

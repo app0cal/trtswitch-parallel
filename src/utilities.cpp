@@ -459,12 +459,14 @@ NumericMatrix invsympd(NumericMatrix matrix, int n, double toler) {
 //'
 //' * \code{start}: The starting time of the resulting subrecord.
 //'
-//' * \code{stop}: The stopping time of the resulting subrecord.
+//' * \code{end}: The ending time of the resulting subrecord.
 //'
 //' * \code{censor}: Whether the subrecord lies strictly within a record
-//'   in the input data.
+//'   in the input data (1 for all but the last interval and 0 for the 
+//'   last interval with cutpoint set equal to tstop).
 //'
-//' * \code{interval}: The interval number.
+//' * \code{interval}: The interval number derived from cut (starting 
+//'   from 0 if the interval lies to the left of the first cutpoint).
 //'
 //' @author Kaifeng Lu, \email{kaifenglu@@gmail.com}
 //'
@@ -754,6 +756,34 @@ List qrcpp(const NumericMatrix& X, double tol = 1e-12) {
 }
 
 
+// [[Rcpp::export]]
+IntegerVector match3(
+  const IntegerVector id1, const NumericVector v1,
+  const IntegerVector id2, const NumericVector v2) {
+  
+  IntegerVector result;
+  int i=0, j=0;
+  while (i < id1.size() && j < id2.size()) {
+    if (id1[i] < id2[j] || (id1[i] == id2[j] && v1[i] < v2[j])) {
+      result.push_back(-1);
+      i++;
+    } else if (id1[i] > id2[j] || (id1[i] == id2[j] && v1[i] > v2[j])) {
+      j++;
+    } else {
+      result.push_back(j);
+      i++;
+      j++;
+    }
+  }
+  
+  while (i < id1.size()) {
+    result.push_back(-1);
+    i++;
+  }
+  
+  return result;
+}
+
 // counterfactual untreated survival times and event indicators
 DataFrame untreated(
     const double psi,
@@ -811,6 +841,7 @@ DataFrame unswitched(
   
   int i;
   double a = exp(psi), a1 = exp(-psi);
+  double c0 = std::min(1.0, a), c1 = std::min(1.0, a1);
   NumericVector u_star(n), t_star(n);
   IntegerVector d_star(n);
   for (i=0; i<n; i++) {
@@ -827,9 +858,9 @@ DataFrame unswitched(
     NumericVector c_star(n);
     for (i=0; i<n; i++) {
       if (treat[i] == 0) {
-        c_star[i] = censor_time[i]*std::min(1.0, a);
+        c_star[i] = censor_time[i]*c0;
       } else {
-        c_star[i] = censor_time[i]*std::min(1.0, a1);
+        c_star[i] = censor_time[i]*c1;
       }
     }
     

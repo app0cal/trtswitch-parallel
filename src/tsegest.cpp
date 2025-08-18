@@ -6,18 +6,21 @@ using namespace Rcpp;
 
 
 List est_psi_tsegest(int n2, int q, int p2, int nids2, 
-          IntegerVector idx2, IntegerVector stratumn3, 
-          IntegerVector osn3, NumericVector os_timen3, 
-          NumericVector censor_timen3,  
-          IntegerVector swtrtn3, NumericVector swtrt_timen3, 
-          IntegerVector idn2, IntegerVector y, 
-          NumericVector tstartn2, NumericVector tstopn2,
-          StringVector covariates_lgs, NumericMatrix zn_lgs2, 
-          bool firth, bool flic, bool recensor, double alpha, 
-          std::string ties, double offset, double psi) {
+                     IntegerVector idx2, IntegerVector stratumn3, 
+                     IntegerVector osn3, NumericVector os_timen3, 
+                     NumericVector censor_timen3,  
+                     IntegerVector swtrtn3, NumericVector swtrt_timen3, 
+                     IntegerVector idn2, IntegerVector y, 
+                     NumericVector tstartn2, NumericVector tstopn2,
+                     StringVector covariates_lgs, NumericMatrix zn_lgs2, 
+                     bool firth, bool flic, bool recensor, double alpha, 
+                     std::string ties, double offset, double psi) {
   
   int i, j; 
+  NumericVector init(1, NA_REAL);
+  
   double a = exp(psi);
+  double c0 = std::min(1.0, a);
   
   // counterfactual survival times and event indicators
   NumericVector t_star(nids2);
@@ -32,7 +35,7 @@ List est_psi_tsegest(int n2, int q, int p2, int nids2,
     }
     
     if (recensor) {
-      c_star = censor_timen3[i]*std::min(1.0, a);
+      c_star = censor_timen3[i]*c0;
       t_star[i] = std::min(u_star, c_star);
       d_star[i] = c_star < u_star ? 0 : osn3[i];
     } else {
@@ -50,7 +53,8 @@ List est_psi_tsegest(int n2, int q, int p2, int nids2,
   
   List fit1 = phregcpp(
     data1, "", "ustratum", "t_star", "", "d_star",
-    "", "", "", "", ties, 0, 0, 1, 0, 0, alpha, 50, 1.0e-9);
+    "", "", "", "", ties, init, 
+    0, 0, 1, 0, 0, alpha, 50, 1.0e-9);
   
   // replicate counterfactual residuals within subjects
   NumericVector resid3 = fit1["residuals"];
@@ -77,7 +81,11 @@ List est_psi_tsegest(int n2, int q, int p2, int nids2,
   
   List fit2 = logisregcpp(
     data2, "", "cross", covariates_lgs, "", "", 
-    "", "uid", "logit", 1, firth, 0, flic, 0, alpha, 50, 1.0e-9);
+    "", "uid", "logit", init, 
+    1, firth, flic, 0, alpha, 150, 1.0e-9);
+  
+  DataFrame sumstat = DataFrame(fit2["sumstat"]);
+  bool fail = sumstat["fail"];
   
   DataFrame parest = DataFrame(fit2["parest"]);
   NumericVector z = parest["z"];
@@ -88,7 +96,8 @@ List est_psi_tsegest(int n2, int q, int p2, int nids2,
     Named("fit_nullcox") = fit1,
     Named("data_logis") = data2,
     Named("fit_logis") = fit2,
-    Named("z_counterfactual") = z_counterfactual);
+    Named("z_counterfactual") = z_counterfactual,
+    Named("fail") = fail);
   
   return out;
 };
@@ -108,11 +117,10 @@ List tsegestcpp(
     const std::string pd_time = "pd_time",
     const std::string swtrt = "swtrt",
     const std::string swtrt_time = "swtrt_time",
-    const std::string swtrt_time_upper = "",
     const StringVector& base_cov = "",
     const StringVector& conf_cov = "",
-    const double low_psi = -1,
-    const double hi_psi = 1,
+    const double low_psi = -2,
+    const double hi_psi = 2,
     const int n_eval_z = 101,
     const bool strata_main_effect_only = 1,
     const bool firth = 0,
@@ -147,7 +155,6 @@ List tsegestcpp(
   bool has_pd_time = hasVariable(data, pd_time);
   bool has_swtrt = hasVariable(data, swtrt);
   bool has_swtrt_time = hasVariable(data, swtrt_time);
-  bool has_swtrt_time_upper = hasVariable(data, swtrt_time_upper);
   
   // create the numeric id variable
   if (!has_id) stop("data must contain the id variable");
@@ -381,24 +388,20 @@ List tsegestcpp(
     }
   }
   
-  if (!has_swtrt_time_upper) {
-    stop("data must contain the swtrt_time_upper variable"); 
-  }
-  
-  if (TYPEOF(data[swtrt_time_upper]) != INTSXP &&
-      TYPEOF(data[swtrt_time_upper]) != REALSXP) {
-    stop("swtrt_time_upper must take numeric values");
-  }
-  
-  NumericVector swtrt_time_uppernz = data[swtrt_time_upper];
-  NumericVector swtrt_time_uppern = clone(swtrt_time_uppernz);
-  if (is_true(any(swtrt_time_uppern < 0.0))) {
-    stop("swtrt_time_upper must be nonnegative");
-  }
-  
+  // if the patient switched before pd, set pd time equal to switch time
   for (i=0; i<n; i++) {
-    if (swtrtn[i] == 1 && swtrt_timen[i] > swtrt_time_uppern[i]) {
-      stop("swtrt_time must be less than or equal to swtrt_time_upper");
+    if (pdn[i] == 1 && swtrtn[i] == 1 && swtrt_timen[i] < pd_timen[i]) {
+      pd_timen[i] = swtrt_timen[i];
+    }
+  }
+  
+  // make sure offset is less than or equal to observed time variables
+  for (i=0; i<n; i++) {
+    if (pdn[i] == 1 && pd_timen[i] < offset) {
+      stop("pd_time must be great than or equal to offset");
+    }
+    if (swtrtn[i] == 1 && swtrt_timen[i] < offset) {
+      stop("swtrt_time must be great than or equal to offset");
     }
   }
   
@@ -508,7 +511,6 @@ List tsegestcpp(
   pd_timen = pd_timen[order];
   swtrtn = swtrtn[order];
   swtrt_timen = swtrt_timen[order];
-  swtrt_time_uppern = swtrt_time_uppern[order];
   zn = subset_matrix_by_row(zn, order);
   zn_lgs = subset_matrix_by_row(zn_lgs, order);
   
@@ -586,9 +588,10 @@ List tsegestcpp(
                 NumericVector& censor_timeb, 
                 IntegerVector& pdb, NumericVector& pd_timeb, 
                 IntegerVector& swtrtb, NumericVector& swtrt_timeb, 
-                NumericVector& swtrt_time_upperb,
                 NumericMatrix& zb, NumericMatrix& zb_lgs)->List {
                   int h, i, j, n = static_cast<int>(idb.size());
+                  bool fail = 0; // whether any model fails to converge
+                  NumericVector init(1, NA_REAL);
                   
                   // order data by treat, id, and time
                   IntegerVector order = seq(0, n-1);
@@ -614,7 +617,6 @@ List tsegestcpp(
                   pd_timeb = pd_timeb[order];
                   swtrtb = swtrtb[order];
                   swtrt_timeb = swtrt_timeb[order];
-                  swtrt_time_upperb = swtrt_time_upperb[order];
                   zb = subset_matrix_by_row(zb, order);
                   zb_lgs = subset_matrix_by_row(zb_lgs, order);
                   
@@ -712,8 +714,7 @@ List tsegestcpp(
                     // post progression data up to switching for the treat
                     IntegerVector l = which(
                       (treatb == h) & (pdb == 1) & (tstopb >= pd_timeb) & 
-                        ((swtrtb != 1) | (tstopb <= swtrt_timeb)) & 
-                        (tstopb <= swtrt_time_upperb));
+                        ((swtrtb != 1) | (tstopb <= swtrt_timeb)));
                     
                     IntegerVector idn2 = idb[l];
                     IntegerVector stratumn2 = stratumb[l];
@@ -807,14 +808,14 @@ List tsegestcpp(
                                 swtrt_timen3, idn2, y, tstartn2, tstopn2, 
                                 covariates_lgs, zn_lgs2, firth, flic, 
                                 recensor, alpha, ties, 
-                                offset](double psi)->double{
+                                offset](double x)->double{
                                   List out = est_psi_tsegest(
                                     n2, q, p2, nids2, idx2, stratumn3, 
                                     osn3, os_timen3, censor_timen3, 
                                     swtrtn3, swtrt_timen3, idn2, y, 
                                     tstartn2, tstopn2, 
                                     covariates_lgs, zn_lgs2, firth, flic, 
-                                    recensor, alpha, ties, offset, psi);
+                                    recensor, alpha, ties, offset, x);
                                   
                                   double z = out["z_counterfactual"];
                                   return z - target;
@@ -826,14 +827,14 @@ List tsegestcpp(
                       
                       if (k == -1) {
                         target = zcrit;
-                        if (g(-6) > 0) {
+                        if (g(low_psi) > 0) {
                           psilower = brent(g, low_psi, psihat, tol);  
                         } else {
                           psilower = NA_REAL;
                         }
                         
                         target = -zcrit;
-                        if (g(6) < 0) {
+                        if (g(hi_psi) < 0) {
                           psiupper = brent(g, psihat, hi_psi, tol);  
                         } else {
                           psiupper = NA_REAL;
@@ -843,6 +844,7 @@ List tsegestcpp(
                     
                     // counter-factual survival times and event indicators
                     double a = exp(psihat);
+                    double c0 = std::min(1.0, a);
                     for (i=0; i<nids; i++) {
                       if (treatn1[i] == h) {
                         double b2, u_star, c_star;
@@ -854,7 +856,7 @@ List tsegestcpp(
                         }
                         
                         if (recensor) {
-                          c_star = censor_timen1[i]*std::min(1.0, a);
+                          c_star = censor_timen1[i]*c0;
                           t_star[i] = std::min(u_star, c_star);
                           d_star[i] = c_star < u_star ? 0 : eventn1[i];
                         } else {
@@ -950,6 +952,9 @@ List tsegestcpp(
                         covariates_lgs, zn_lgs2, firth, flic, 
                         recensor, alpha, ties, offset, psihat);
                       
+                      bool fail_lgs = out["fail"];
+                      if (fail_lgs) fail = 1;
+                      
                       DataFrame data3 = DataFrame(out["data_nullcox"]);
                       DataFrame data4 = DataFrame(out["data_logis"]);
                       List fit3 = out["fit_nullcox"];
@@ -1033,17 +1038,21 @@ List tsegestcpp(
                   
                   List fit_outcome = phregcpp(
                     data_outcome, "", "ustratum", "t_star", "", "d_star",
-                    covariates, "", "", "", ties, 0, 0, 0, 0, 0, alpha, 
-                    50, 1.0e-9);
+                    covariates, "", "", "", ties, init, 
+                    0, 0, 0, 0, 0, alpha, 50, 1.0e-9);
+                  
+                  DataFrame sumstat_cox = DataFrame(fit_outcome["sumstat"]);
+                  bool fail_cox = sumstat_cox["fail"];
+                  if (fail_cox == 1) fail = 1;
                   
                   DataFrame parest = DataFrame(fit_outcome["parest"]);
                   NumericVector beta = parest["beta"];
                   NumericVector sebeta = parest["sebeta"];
-                  NumericVector z = parest["z"];
+                  NumericVector pval = parest["p"];
                   double hrhat = exp(beta[0]);
                   double hrlower = exp(beta[0] - zcrit*sebeta[0]);
                   double hrupper = exp(beta[0] + zcrit*sebeta[0]);
-                  double pvalue = 2*(1 - R::pnorm(fabs(z[0]), 0, 1, 1, 0));
+                  double pvalue = pval[0];
                   
                   List out;
                   if (k == -1) {
@@ -1067,7 +1076,8 @@ List tsegestcpp(
                       Named("hrhat") = hrhat,
                       Named("hrlower") = hrlower,
                       Named("hrupper") = hrupper,
-                      Named("pvalue") = pvalue);
+                      Named("pvalue") = pvalue,
+                      Named("fail") = fail);
                   } else {
                     out = List::create(
                       Named("psihat") = psi0hat,
@@ -1075,7 +1085,8 @@ List tsegestcpp(
                       Named("hrhat") = hrhat,
                       Named("hrlower") = hrlower,
                       Named("hrupper") = hrupper,
-                      Named("pvalue") = pvalue);
+                      Named("pvalue") = pvalue,
+                      Named("fail") = fail);
                   }
                   
                   return out;
@@ -1083,8 +1094,7 @@ List tsegestcpp(
   
   List out = f(idn, stratumn, tstartn, tstopn, eventn, treatn,
                osn, os_timen, censor_timen, pdn, pd_timen, 
-               swtrtn, swtrt_timen, swtrt_time_uppern, 
-               zn, zn_lgs);
+               swtrtn, swtrt_timen, zn, zn_lgs);
   
   List data_switch = out["data_switch"];
   List km_switch = out["km_switch"];
@@ -1143,10 +1153,12 @@ List tsegestcpp(
   double hrlower = out["hrlower"];
   double hrupper = out["hrupper"];
   double pvalue = out["pvalue"];
-
+  bool fail = out["fail"];
+  
   // construct the confidence interval for HR
   String hr_CI_type;
   NumericVector hrhats(n_boot), psihats(n_boot), psi1hats(n_boot);
+  LogicalVector fails(n_boot);
   if (!boot) { // use Cox model to construct CI for HR if no boot
     hr_CI_type = "Cox model";
   } else { // bootstrap the entire process to construct CI for HR
@@ -1161,7 +1173,7 @@ List tsegestcpp(
       IntegerVector idb(N), stratumb(N), eventb(N), treatb(N);
       IntegerVector osb(N), pdb(N), swtrtb(N);
       NumericVector tstartb(N), tstopb(N), os_timeb(N), censor_timeb(N);
-      NumericVector pd_timeb(N), swtrt_timeb(N), swtrt_time_upperb(N);
+      NumericVector pd_timeb(N), swtrt_timeb(N);
       NumericMatrix zb(N, p), zb_lgs(N, q+p2);
       
       // sample the subject-level data with replacement by treatment group
@@ -1178,27 +1190,23 @@ List tsegestcpp(
         int idb1 = idn[idx[i]] + h*nids;
         
         for (j=idx[i]; j<idx[i+1]; j++) {
-          int r = l + j - idx[i];
-          
-          idb[r] = idb1;
-          stratumb[r] = stratumn[j];
-          tstartb[r] = tstartn[j];
-          tstopb[r] = tstopn[j];
-          eventb[r] = eventn[j];
-          treatb[r] = treatn[j];
-          osb[r] = osn[j];
-          os_timeb[r] = os_timen[j];
-          censor_timeb[r] = censor_timen[j];
-          pdb[r] = pdn[j];
-          pd_timeb[r] = pd_timen[j];
-          swtrtb[r] = swtrtn[j];
-          swtrt_timeb[r] = swtrt_timen[j];
-          swtrt_time_upperb[r] = swtrt_time_uppern[j];
-          zb(r,_) = zn(j,_);
-          zb_lgs(r,_) = zn_lgs(j,_);
+          idb[l] = idb1;
+          stratumb[l] = stratumn[j];
+          tstartb[l] = tstartn[j];
+          tstopb[l] = tstopn[j];
+          eventb[l] = eventn[j];
+          treatb[l] = treatn[j];
+          osb[l] = osn[j];
+          os_timeb[l] = os_timen[j];
+          censor_timeb[l] = censor_timen[j];
+          pdb[l] = pdn[j];
+          pd_timeb[l] = pd_timen[j];
+          swtrtb[l] = swtrtn[j];
+          swtrt_timeb[l] = swtrt_timen[j];
+          zb(l,_) = zn(j,_);
+          zb_lgs(l,_) = zn_lgs(j,_);
+          l++;
         }
-        
-        l += idx[i+1] - idx[i];
       }
       
       IntegerVector sub = Range(0,l-1);
@@ -1215,15 +1223,14 @@ List tsegestcpp(
       pd_timeb = pd_timeb[sub];
       swtrtb = swtrtb[sub];
       swtrt_timeb = swtrt_timeb[sub];
-      swtrt_time_upperb = swtrt_time_upperb[sub];
       zb = subset_matrix_by_row(zb, sub);
       zb_lgs = subset_matrix_by_row(zb_lgs, sub);
       
       out = f(idb, stratumb, tstartb, tstopb, eventb, treatb,
               osb, os_timeb, censor_timeb, pdb, pd_timeb, 
-              swtrtb, swtrt_timeb, swtrt_time_upperb, 
-              zb, zb_lgs);
+              swtrtb, swtrt_timeb, zb, zb_lgs);
       
+      fails[k] = out["fail"];
       hrhats[k] = out["hrhat"];
       psihats[k] = out["psihat"];
       psi1hats[k] = out["psi1hat"];
@@ -1231,21 +1238,25 @@ List tsegestcpp(
     
     // obtain bootstrap confidence interval for HR
     double loghr = log(hrhat);
-    NumericVector loghrs = log(hrhats);
+    LogicalVector ok = 1 - fails;
+    int n_ok = sum(ok);
+    NumericVector loghrs = log(hrhats[ok]);
     double sdloghr = sd(loghrs);
-    double tcrit = R::qt(1-alpha/2, n_boot-1, 1, 0);
+    double tcrit = R::qt(1-alpha/2, n_ok-1, 1, 0);
     hrlower = exp(loghr - tcrit*sdloghr);
     hrupper = exp(loghr + tcrit*sdloghr);
     hr_CI_type = "bootstrap";
-    pvalue = 2*(1 - R::pt(fabs(loghr/sdloghr), n_boot-1, 1, 0));
+    pvalue = 2*(1 - R::pt(fabs(loghr/sdloghr), n_ok-1, 1, 0));
     
     // obtain bootstrap confidence interval for psi
-    double sdpsi = sd(psihats);
+    NumericVector psihats1 = psihats[ok];
+    double sdpsi = sd(psihats1);
     psilower = psihat - tcrit*sdpsi;
     psiupper = psihat + tcrit*sdpsi;
     psi_CI_type = "bootstrap";
     
-    double sdpsi1 = sd(psi1hats);
+    NumericVector psi1hats1 = psi1hats[ok];
+    double sdpsi1 = sd(psi1hats1);
     psi1lower = psi1hat - tcrit*sdpsi1;
     psi1upper = psi1hat + tcrit*sdpsi1;
   }
@@ -1291,6 +1302,7 @@ List tsegestcpp(
     Named("analysis_switch") = analysis_switch,
     Named("data_outcome") = data_outcome,
     Named("fit_outcome") = fit_outcome,
+    Named("fail") = fail,
     Named("settings") = settings);
   
   if (!swtrt_control_only) {
@@ -1300,6 +1312,7 @@ List tsegestcpp(
   }
   
   if (boot) {
+    result.push_back(fails, "fail_boots");
     result.push_back(hrhats, "hr_boots");
     result.push_back(psihats, "psi_boots");
     if (!swtrt_control_only) {

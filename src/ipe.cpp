@@ -22,7 +22,7 @@ List est_psi_ipe(
     const bool recensor,
     const bool autoswitch,
     const double alpha) {
-
+  NumericVector init(1, NA_REAL);
   DataFrame df = unswitched(psi*treat_modifier, n, id, time, event, treat,
                             rx, censor_time, recensor, autoswitch);
 
@@ -33,9 +33,12 @@ List est_psi_ipe(
   }
 
   List fit = liferegcpp(df, "", "", "t_star", "", "d_star",
-                        covariates_aft, "", "", "", dist, 0, 0, alpha, 
-                        50, 1.0e-9);
+                        covariates_aft, "", "", "", dist, init, 
+                        0, 0, alpha, 50, 1.0e-9);
   
+  DataFrame sumstat = DataFrame(fit["sumstat"]);
+  bool fail = sumstat["fail"];
+
   DataFrame parest = DataFrame(fit["parest"]);
   NumericVector beta = parest["beta"];
   double psinew = -beta[1]/treat_modifier;
@@ -43,7 +46,8 @@ List est_psi_ipe(
   List out = List::create(
     Named("data_aft") = df,
     Named("fit_aft") = fit,
-    Named("psinew") = psinew
+    Named("psinew") = psinew,
+    Named("fail") = fail
   );
   
   return out;
@@ -62,8 +66,8 @@ List ipecpp(const DataFrame data,
             const StringVector& base_cov = "",
             const std::string aft_dist = "weibull",
             const bool strata_main_effect_only = 1,
-            const double low_psi = -1,
-            const double hi_psi = 1,
+            const double low_psi = -2,
+            const double hi_psi = 2,
             const double treat_modifier = 1,
             const bool recensor = 1,
             const bool admin_recensor_only = 1,
@@ -366,6 +370,8 @@ List ipecpp(const DataFrame data,
                 NumericVector& rxb, NumericVector& censor_timeb,
                 NumericMatrix& zb, NumericMatrix& zb_aft)->List {
                   int j;
+                  bool fail = 0; // whether any model fails to converge
+                  NumericVector init(1, NA_REAL);
                   
                   // estimate psi
                   auto g = [n, q, p, idb, timeb, eventb, treatb, rxb, 
@@ -396,12 +402,25 @@ List ipecpp(const DataFrame data,
                     kmstar = kmest(Sstar, "", "treated", "t_star",
                                    "d_star", "log-log", 1-alpha, 1);
                     
+                    Sstar.push_back(stratumb, "ustratum");
+                    
+                    for (j=0; j<p; j++) {
+                      String zj = covariates[j+1];
+                      NumericVector u = zb(_,j);
+                      Sstar.push_back(u, zj);
+                    }
+                    
                     List out_aft = est_psi_ipe(
                       psihat, n, q, p, idb, timeb, eventb, treatb, rxb,
                       censor_timeb, covariates_aft, zb_aft, dist, 
                       treat_modifier, recensor, autoswitch, alpha);
                     
+                    bool fail_aft = out_aft["fail"];
+                    if (fail_aft) fail = 1;
+                    
                     data_aft = DataFrame(out_aft["data_aft"]);
+                    data_aft.push_back(stratumb, "ustratum");
+                    
                     fit_aft = out_aft["fit_aft"];
                   }
                   
@@ -420,14 +439,18 @@ List ipecpp(const DataFrame data,
 
                   List fit_outcome = phregcpp(
                     data_outcome, "", "ustratum", "t_star", "", "d_star", 
-                    covariates, "", "", "", ties, 0, 0, 0, 0, 0, alpha, 
-                    50, 1.0e-9);
+                    covariates, "", "", "", ties, init, 
+                    0, 0, 0, 0, 0, alpha, 50, 1.0e-9);
 
+                  DataFrame sumstat_cox = DataFrame(fit_outcome["sumstat"]);
+                  bool fail_cox = sumstat_cox["fail"];
+                  if (fail_cox == 1) fail = 1;
+                  
                   DataFrame parest = DataFrame(fit_outcome["parest"]);
                   NumericVector beta = parest["beta"];
-                  NumericVector z = parest["z"];
+                  NumericVector pval = parest["p"];
                   double hrhat = exp(beta[0]/treat_modifier);
-                  double pvalue = 2*(1 - R::pnorm(fabs(z[0]), 0, 1, 1, 0));
+                  double pvalue = pval[0];
                   
                   List out;
                   if (k == -1) {
@@ -440,12 +463,14 @@ List ipecpp(const DataFrame data,
                       Named("fit_outcome") = fit_outcome,
                       Named("psihat") = psihat,
                       Named("hrhat") = hrhat,
-                      Named("pvalue") = pvalue);
+                      Named("pvalue") = pvalue,
+                      Named("fail") = fail);
                   } else {
                     out = List::create(
                       Named("psihat") = psihat,
                       Named("hrhat") = hrhat,
-                      Named("pvalue") = pvalue);
+                      Named("pvalue") = pvalue,
+                      Named("fail") = fail);
                   }
 
                   return out;
@@ -526,34 +551,47 @@ List ipecpp(const DataFrame data,
   
   
   if (has_stratum) {
+    IntegerVector ustratum = Sstar["ustratum"];
     for (i=0; i<p_stratum; i++) {
       String s = stratum[i];
       if (TYPEOF(data[s]) == INTSXP) {
         IntegerVector stratumwi = u_stratum[s];
-        Sstar.push_back(stratumwi[stratumn-1], s);
+        Sstar.push_back(stratumwi[ustratum-1], s);
       } else if (TYPEOF(data[s]) == REALSXP) {
         NumericVector stratumwn = u_stratum[s];
-        Sstar.push_back(stratumwn[stratumn-1], s);
+        Sstar.push_back(stratumwn[ustratum-1], s);
       } else if (TYPEOF(data[s]) == STRSXP) {
         StringVector stratumwc = u_stratum[s];
-        Sstar.push_back(stratumwc[stratumn-1], s);
+        Sstar.push_back(stratumwc[ustratum-1], s);
       }
     }
     
-    IntegerVector ustratum = data_outcome["ustratum"];
+    ustratum = data_aft["ustratum"];
     for (i=0; i<p_stratum; i++) {
       String s = stratum[i];
       if (TYPEOF(data[s]) == INTSXP) {
         IntegerVector stratumwi = u_stratum[s];
         data_aft.push_back(stratumwi[ustratum-1], s);
-        data_outcome.push_back(stratumwi[ustratum-1], s);
       } else if (TYPEOF(data[s]) == REALSXP) {
         NumericVector stratumwn = u_stratum[s];
         data_aft.push_back(stratumwn[ustratum-1], s);
-        data_outcome.push_back(stratumwn[ustratum-1], s);
       } else if (TYPEOF(data[s]) == STRSXP) {
         StringVector stratumwc = u_stratum[s];
         data_aft.push_back(stratumwc[ustratum-1], s);
+      }
+    }
+    
+    ustratum = data_outcome["ustratum"];
+    for (i=0; i<p_stratum; i++) {
+      String s = stratum[i];
+      if (TYPEOF(data[s]) == INTSXP) {
+        IntegerVector stratumwi = u_stratum[s];
+        data_outcome.push_back(stratumwi[ustratum-1], s);
+      } else if (TYPEOF(data[s]) == REALSXP) {
+        NumericVector stratumwn = u_stratum[s];
+        data_outcome.push_back(stratumwn[ustratum-1], s);
+      } else if (TYPEOF(data[s]) == STRSXP) {
+        StringVector stratumwc = u_stratum[s];
         data_outcome.push_back(stratumwc[ustratum-1], s);
       }
     }
@@ -568,10 +606,12 @@ List ipecpp(const DataFrame data,
   String psi_CI_type = "log-rank p-value";
   double hrhat = out["hrhat"];
   double pvalue = out["pvalue"];
+  bool fail = out["fail"];
   
   // construct the confidence interval for HR
   double hrlower, hrupper;
   NumericVector hrhats(n_boot), psihats(n_boot);
+  LogicalVector fails(n_boot);
   String hr_CI_type;
   if (!boot) { // use log-rank p-value to construct CI for HR if no boot
     double loghr = log(hrhat);
@@ -634,22 +674,26 @@ List ipecpp(const DataFrame data,
       List out = f(idb, stratumb, timeb, eventb, treatb, rxb, censor_timeb, 
                    zb, zb_aft);
       
+      fails[k] = out["fail"];
       hrhats[k] = out["hrhat"];
       psihats[k] = out["psihat"];
     }
 
     // obtain bootstrap confidence interval for HR
     double loghr = log(hrhat);
-    NumericVector loghrs = log(hrhats);
+    LogicalVector ok = 1 - fails;
+    int n_ok = sum(ok);
+    NumericVector loghrs = log(hrhats[ok]);
     double sdloghr = sd(loghrs);
-    double tcrit = R::qt(1-alpha/2, n_boot-1, 1, 0);
+    double tcrit = R::qt(1-alpha/2, n_ok-1, 1, 0);
     hrlower = exp(loghr - tcrit*sdloghr);
     hrupper = exp(loghr + tcrit*sdloghr);
     hr_CI_type = "bootstrap";
-    pvalue = 2*(1 - R::pt(fabs(loghr/sdloghr), n_boot-1, 1, 0));
+    pvalue = 2*(1 - R::pt(fabs(loghr/sdloghr), n_ok-1, 1, 0));
     
     // obtain bootstrap confidence interval for psi
-    double sdpsi = sd(psihats);
+    NumericVector psihats1 = psihats[ok];
+    double sdpsi = sd(psihats1);
     psilower = psihat - tcrit*sdpsi;
     psiupper = psihat + tcrit*sdpsi;
     psi_CI_type = "bootstrap";
@@ -686,9 +730,11 @@ List ipecpp(const DataFrame data,
     Named("fit_aft") = fit_aft,
     Named("data_outcome") = data_outcome,
     Named("fit_outcome") = fit_outcome,
+    Named("fail") = fail,
     Named("settings") = settings);
 
   if (boot) {
+    result.push_back(fails, "fail_boots");
     result.push_back(hrhats, "hr_boots");
     result.push_back(psihats, "psi_boots");
   }

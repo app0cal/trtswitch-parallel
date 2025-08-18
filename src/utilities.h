@@ -10,8 +10,7 @@ void set_seed(int seed);
 
 IntegerVector which(const LogicalVector& vector);
 
-IntegerVector findInterval3(NumericVector x,
-                            NumericVector breaks);
+IntegerVector findInterval3(NumericVector x, NumericVector v);
 
 double brent(const std::function<double(double)>& f,
              double x1, double x2, double tol);
@@ -44,6 +43,10 @@ NumericVector house(const NumericVector& x);
 void row_house(NumericMatrix& A, const int i1, const int i2,
                const int j1, const int j2, const NumericVector& v);
 List qrcpp(const NumericMatrix& X, double tol);
+
+IntegerVector match3(
+    const IntegerVector id1, const NumericVector v1,
+    const IntegerVector id2, const NumericVector v2);
 
 DataFrame untreated(
     const double psi,

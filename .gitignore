@@ -1,0 +1,49 @@
+@"
+* text=auto eol=lf
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# Treat common binaries as binary (no EOL conversion/diffs)
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.pdf binary
+*.RData binary
+*.rds binary
+"@ | Out-File -Encoding ascii .gitattributes
+
+@"
+# R / RStudio
+.Rhistory
+.RData
+.Ruserdata
+.Rproj.user/
+*.Rproj
+
+# R build artifacts
+.Rcheck/
+*.tar.gz
+
+# Dev/editor stuff
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Compiled objects (Windows + general)
+*.o
+*.so
+*.dll
+*.dylib
+*.a
+*.lib
+*.exp
+*.pdb
+*.idb
+*.exe
+
+# Package src outputs (just in case)
+src/*.o
+src/*.a
+src/*.dll
+"@ | Out-File -Encoding ascii .gitignore

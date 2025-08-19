@@ -1,1 +1,12 @@
 * text=auto eol=lf
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# Treat common binaries as binary (no EOL conversion/diffs)
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.pdf binary
+*.RData binary
+*.rds binary

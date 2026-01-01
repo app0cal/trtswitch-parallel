@@ -130,7 +130,11 @@
 #'   \code{"d_star"}, \code{"treated"}, \code{base_cov}, and \code{treat}.
 #'
 #' * \code{fit_outcome}: The fitted outcome Cox model.
+#' 
+#' * \code{fail}: Whether a model fails to converge.
 #'
+#' * \code{psimissing}: Whether the psi parameter cannot be estimated.
+#' 
 #' * \code{settings}: A list with the following components:
 #'
 #'     - \code{aft_dist}: The distribution for time to event for the AFT
@@ -168,6 +172,12 @@
 #'
 #' * \code{psi_trt_CI}: The confidence interval for \code{psi_trt} if
 #'   \code{swtrt_control_only} is \code{FALSE}.
+#'
+#' * \code{fail_boots}: The indicators for failed bootstrap samples
+#'   if \code{boot} is \code{TRUE}.
+#'
+#' * \code{fail_boots_data}: The data for failed bootstrap samples
+#'   if \code{boot} is \code{TRUE}.
 #'
 #' * \code{hr_boots}: The bootstrap hazard ratio estimates if \code{boot} is
 #'   \code{TRUE}.
@@ -227,38 +237,38 @@
 #' c(fit1$hr, fit1$hr_CI)
 #'
 #' @export
-#' 
-tsesimp_mt <- function(data, id = "id", stratum = "", time = "time", 
-                                  event = "event", treat = "treat", 
-                                  censor_time = "censor_time",
-                                  pd = "pd", pd_time = "pd_time",
-                                  swtrt = "swtrt", swtrt_time = "swtrt_time",
-                                  base_cov = "", base2_cov = "",
-                                  aft_dist = "weibull", strata_main_effect_only = TRUE,
-                                  recensor = TRUE, admin_recensor_only = TRUE,
-                                  swtrt_control_only = TRUE, alpha = 0.05, 
-                                  ties = "efron", offset = 1, 
-                                  boot = TRUE, n_boot = 1000, seed = NA) {
-  
+tsesimp <- function(data, id = "id", stratum = "", time = "time", 
+                    event = "event", treat = "treat", 
+                    censor_time = "censor_time",
+                    pd = "pd", pd_time = "pd_time",
+                    swtrt = "swtrt", swtrt_time = "swtrt_time",
+                    base_cov = "", base2_cov = "",
+                    aft_dist = "weibull", strata_main_effect_only = TRUE,
+                    recensor = TRUE, admin_recensor_only = TRUE,
+                    swtrt_control_only = TRUE, alpha = 0.05, 
+                    ties = "efron", offset = 1, 
+                    boot = TRUE, n_boot = 1000, seed = NA) {
+
   rownames(data) = NULL
-  
+
   elements = c(stratum, time, event, treat, censor_time, pd, swtrt)
   elements = unique(elements[elements != "" & elements != "none"])
   fml = formula(paste("~", paste(elements, collapse = "+")))
   mf = model.frame(fml, data = data, na.action = na.omit)
-  
+
   rownum = as.integer(rownames(mf))
   df = data[rownum,]
-  
+
   nvar = length(base_cov)
   if (missing(base_cov) || is.null(base_cov) || (nvar == 1 && (
     base_cov[1] == "" || tolower(base_cov[1]) == "none"))) {
     p = 0
   } else {
     fml1 = formula(paste("~", paste(base_cov, collapse = "+")))
-    p = length(rownames(attr(terms(fml1), "factors")))
+    vnames = rownames(attr(terms(fml1), "factors"))
+    p = length(vnames)
   }
-  
+
   if (p >= 1) {
     mf1 <- model.frame(fml1, data = df, na.action = na.pass)
     mm <- model.matrix(fml1, mf1)
@@ -272,16 +282,17 @@ tsesimp_mt <- function(data, id = "id", stratum = "", time = "time",
   } else {
     varnames = ""
   }
-  
+
   nvar2 = length(base2_cov)
   if (missing(base2_cov) || is.null(base2_cov) || (nvar2 == 1 && (
     base2_cov[1] == "" || tolower(base2_cov[1]) == "none"))) {
     p2 = 0
   } else {
     fml2 = formula(paste("~", paste(base2_cov, collapse = "+")))
-    p2 = length(rownames(attr(terms(fml2), "factors")))
+    vnames2 = rownames(attr(terms(fml2), "factors"))
+    p2 = length(vnames2)
   }
-  
+
   if (p2 >= 1) {
     mf2 <- model.frame(fml2, data = df, na.action = na.pass)
     mm2 = model.matrix(fml2, mf2)
@@ -295,8 +306,8 @@ tsesimp_mt <- function(data, id = "id", stratum = "", time = "time",
   } else {
     varnames2 = ""
   }
-  
-  out <- tsesimpcpp_mt(
+
+  out <- tsesimpcpp(
     data = df, id = id, stratum = stratum, time = time, 
     event = event, treat = treat, censor_time = censor_time, 
     pd = pd, pd_time = pd_time, swtrt = swtrt, 
@@ -308,55 +319,48 @@ tsesimp_mt <- function(data, id = "id", stratum = "", time = "time",
     ties = ties, offset = offset, 
     boot = boot, n_boot = n_boot, seed = seed)
   
-  out$data_outcome$uid <- NULL
-  out$data_outcome$ustratum <- NULL
-  
-  
-  if (p >= 1) {
-    t1 = terms(formula(paste("~", paste(base_cov, collapse = "+"))))
-    t2 = attr(t1, "factors")
-    t3 = rownames(t2)
+  if (!out$psimissing) {
+    out$data_outcome$uid <- NULL
+    out$data_outcome$ustratum <- NULL
     
-    add_vars <- setdiff(t3, varnames)
-    if (length(add_vars) > 0) {
-      out$data_outcome <- merge(out$data_outcome, df[, c(id, add_vars)], 
-                                by = id, all.x = TRUE, sort = FALSE)
-    }
-    
-    del_vars <- setdiff(varnames, t3)
-    if (length(del_vars) > 0) {
-      out$data_outcome[, del_vars] <- NULL
-    }
-  }
-  
-  if (p2 >= 1) {
-    t1 = terms(formula(paste("~", paste(base2_cov, collapse = "+"))))
-    t2 = attr(t1, "factors")
-    t3 = rownames(t2)
-    
-    K = ifelse(swtrt_control_only, 1, 2)
-    tem_vars <- c(pd_time, swtrt_time, time)
-    add_vars <- c(setdiff(t3, varnames2), tem_vars)
-    if (length(add_vars) > 0) {
-      for (h in 1:K) {
-        out$data_aft[[h]]$data <- merge(out$data_aft[[h]]$data, 
-                                        df[, c(id, add_vars)], 
-                                        by = id, all.x = TRUE, sort = FALSE)
+    if (p >= 1) {
+      add_vars <- setdiff(vnames, varnames)
+      if (length(add_vars) > 0) {
+        out$data_outcome <- merge(out$data_outcome, df[, c(id, add_vars)], 
+                                  by = id, all.x = TRUE, sort = FALSE)
+      }
+      
+      del_vars <- setdiff(varnames, vnames)
+      if (length(del_vars) > 0) {
+        out$data_outcome[, del_vars] <- NULL
       }
     }
     
-    del_vars <- setdiff(varnames2, t3)
-    if (length(del_vars) > 0) {
+    if (p2 >= 1) {
+      K = ifelse(swtrt_control_only, 1, 2)
+      tem_vars <- c(pd_time, swtrt_time, time)
+      add_vars <- c(setdiff(vnames2, varnames2), tem_vars)
+      if (length(add_vars) > 0) {
+        for (h in 1:K) {
+          out$data_aft[[h]]$data <- merge(out$data_aft[[h]]$data, 
+                                          df[, c(id, add_vars)], 
+                                          by = id, all.x = TRUE, sort = FALSE)
+        }
+      }
+      
+      del_vars <- setdiff(varnames2, vnames2)
+      if (length(del_vars) > 0) {
+        for (h in 1:K) {
+          out$data_aft[[h]]$data[, del_vars] <- NULL
+        }
+      }
+      
       for (h in 1:K) {
-        out$data_aft[[h]]$data[, del_vars] <- NULL
+        out$data_aft[[h]]$data <- out$data_aft[[h]]$data[
+          , !startsWith(names(out$data_aft[[h]]$data), "stratum_")]
       }
     }
-    
-    for (h in 1:K) {
-      out$data_aft[[h]]$data <- out$data_aft[[h]]$data[
-        , !startsWith(names(out$data_aft[[h]]$data), "stratum_")]
-    }
   }
-  
+
   out
 }

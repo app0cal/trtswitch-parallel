@@ -10,6 +10,20 @@ Rcpp::Rostream<true>&  Rcpp::Rcout = Rcpp::Rcpp_cout_get();
 Rcpp::Rostream<false>& Rcpp::Rcerr = Rcpp::Rcpp_cerr_get();
 #endif
 
+// debug_aft_llik_score_info
+List debug_aft_llik_score_info(DataFrame data1, StringVector covariates_aft, std::string dist, double alpha);
+RcppExport SEXP _trtswitch_debug_aft_llik_score_info(SEXP data1SEXP, SEXP covariates_aftSEXP, SEXP distSEXP, SEXP alphaSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< DataFrame >::type data1(data1SEXP);
+    Rcpp::traits::input_parameter< StringVector >::type covariates_aft(covariates_aftSEXP);
+    Rcpp::traits::input_parameter< std::string >::type dist(distSEXP);
+    Rcpp::traits::input_parameter< double >::type alpha(alphaSEXP);
+    rcpp_result_gen = Rcpp::wrap(debug_aft_llik_score_info(data1, covariates_aft, dist, alpha));
+    return rcpp_result_gen;
+END_RCPP
+}
 // ipcwcpp
 List ipcwcpp(const DataFrame data, const std::string id, const StringVector& stratum, const std::string tstart, const std::string tstop, const std::string event, const std::string treat, const std::string swtrt, const std::string swtrt_time, const StringVector& base_cov, const StringVector& numerator, const StringVector& denominator, const bool logistic_switching_model, const bool strata_main_effect_only, const bool firth, const bool flic, const int ns_df, const bool stabilized_weights, const double trunc, const bool trunc_upper_only, const bool swtrt_control_only, const double alpha, const std::string ties, const bool boot, const int n_boot, const int seed);
 RcppExport SEXP _trtswitch_ipcwcpp(SEXP dataSEXP, SEXP idSEXP, SEXP stratumSEXP, SEXP tstartSEXP, SEXP tstopSEXP, SEXP eventSEXP, SEXP treatSEXP, SEXP swtrtSEXP, SEXP swtrt_timeSEXP, SEXP base_covSEXP, SEXP numeratorSEXP, SEXP denominatorSEXP, SEXP logistic_switching_modelSEXP, SEXP strata_main_effect_onlySEXP, SEXP firthSEXP, SEXP flicSEXP, SEXP ns_dfSEXP, SEXP stabilized_weightsSEXP, SEXP truncSEXP, SEXP trunc_upper_onlySEXP, SEXP swtrt_control_onlySEXP, SEXP alphaSEXP, SEXP tiesSEXP, SEXP bootSEXP, SEXP n_bootSEXP, SEXP seedSEXP) {
@@ -763,6 +777,7 @@ END_RCPP
 }
 
 static const R_CallMethodDef CallEntries[] = {
+    {"_trtswitch_debug_aft_llik_score_info", (DL_FUNC) &_trtswitch_debug_aft_llik_score_info, 4},
     {"_trtswitch_ipcwcpp", (DL_FUNC) &_trtswitch_ipcwcpp, 26},
     {"_trtswitch_ipecpp", (DL_FUNC) &_trtswitch_ipecpp, 23},
     {"_trtswitch_logisregcpp", (DL_FUNC) &_trtswitch_logisregcpp, 17},

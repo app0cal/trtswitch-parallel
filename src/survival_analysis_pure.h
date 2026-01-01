@@ -1,11 +1,13 @@
 #include <vector>
 #include <string>
 
+// tsesimp functions below: 
+
 //structs to tightly connect every process in this function, to extend this or enable other features simply edit these or 
 //what we get sent from out test dummy of tsesimp_test.cpp
 struct trial_data {
   std::vector<double>              pps; // time
-  std::vector<int>                 event; // event :P
+  std::vector<int>                 event; // event 
   std::vector<int>                 swtrt; // switch treatment
   std::vector<std::string>         aft_names; // covariates for the outcome model
   std::vector<std::vector<double>> aft;  // columns matching aft names
@@ -17,16 +19,8 @@ struct trial_data {
   std::vector<std::string>       id_raw; // numeric id variable
 };
 
-/*
-Holds exactly what bygroup(...) returned in Rcpp:
-//  - index[i] = group ID (1…G) for row i
-//  - lookup[g] = vector of all row-indices i where index[i]==g
 
-*/
-struct group_index {
-  std::vector<int> index;
-  std::vector<std::vector<int>> lookup;
-};
+// survival_analysis structs below:
 
 struct aftparams_pure {
   std::string dist;
@@ -38,6 +32,28 @@ struct aftparams_pure {
   std::vector<double> offset;
   std::vector<std::vector<double>> z;
   int nstrata;
+};
+
+struct coxdata {
+  std::vector<double> time;     // t_star
+  std::vector<int> event;       // d_star
+  std::vector<int> stratum;     // length n,nullptr if none
+  std::vector<double> x;        // row-major n*p 
+  int n;
+  int p;
+
+  //OPTIONAL
+  std::vector<double> time2;     // empty -> none
+  std::vector<double> weights; // empty -> none
+  std::vector<double> offset; // empty -> none
+  std::vector<int> id; // empty -> none
+};
+
+struct coxfitout {
+  bool fail;
+  std::vector<double> beta;     // size p (here p=1 for treated, or more if you include more covars)
+  std::vector<double> sebeta;   // size p
+  std::vector<double> p;        // size p (optional)
 };
 
 struct liferegloopresult{
@@ -52,6 +68,29 @@ struct f_der_eta_1_result {
   std::vector<double> dg;
   std::vector<double> ddg;
 };
+
+// helper functions below:
+
+/*
+Holds exactly what bygroup(...) returned in Rcpp:
+//  - index[i] = group ID (1…G) for row i
+//  - lookup[g] = vector of all row-indices i where index[i]==g
+
+*/
+struct group_index {
+  std::vector<int> index;             //n, 1 .. G 
+  std::vector<std::string> levels;    //G+1, levels[g] label
+  std::vector<std::vector<int>> rows; //optional
+};
+
+struct group_lookup_table {
+  std::vector<int> index; // length n
+  // one entry per group, each group row holds the stratum columns as strings
+  std::vector<std::vector<std::string>> group_values; // [g][col]
+  // or: group_values[g] is a vector<string> of length p_stratum
+};
+
+
 
 
 /*Function Signatures:
@@ -158,6 +197,28 @@ List lifereg_purecpp(
   const int maxiter,
   const double eps
 );
+
+List phreg_purecpp(
+const DataFrame data,
+const StringVector& rep = "",
+const StringVector& stratum = "",
+const std::string time = "time",
+const std::string time2 = "",
+const std::string event = "event",
+const StringVector& covariates = "",
+const std::string weight = "",
+const std::string offset = "",
+const std::string id = "",
+const std::string ties = "efron",
+const NumericVector& init = NA_REAL,
+const bool robust = 0,
+const bool est_basehaz = 1,
+const bool est_resid = 1,
+const bool firth = 0,
+const bool plci = 0,
+const double alpha = 0.05,
+const int maxiter = 50,
+const double eps = 1.0e-9);
 
 template<typename STL, typename RCPPTYPE>
 STL to_std(const RCPPTYPE& rvec) {

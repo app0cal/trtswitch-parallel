@@ -1,5 +1,4 @@
-CXX_STD = CXX17
-
-PKG_CPPFLAGS =
-PKG_CXXFLAGS = -O0 -g -fno-omit-frame-pointer -D_GLIBCXX_DEBUG -Wall -pedantic -fdiagnostics-color=always
+CXX17STD = -std=gnu++17
+CXX17FLAGS = -O0 -g -Wall -Wextra
+PKG_CXXFLAGS =
 PKG_LIBS =

@@ -1,5 +1,5 @@
 #include <Rcpp.h>
-#include <R_ext/Applic.h>
+//#include <R_ext/Applic.h>
 #include "utilities_pure.h"
 
 #include <vector>
@@ -10,6 +10,10 @@
 #include <boost/math/distributions/complement.hpp>
 #include <boost/math/distributions/logistic.hpp>
 #include <boost/math/distributions/chi_squared.hpp>
+
+#include <limits>
+
+#include <Rmath.h>
 
 namespace bm = boost::math;
 /*
@@ -23,6 +27,17 @@ The main idea is to keep the pipeline of data processing similar to the original
 //double check code to have size_t i = 0, as loop because we can't compare a integer with a size_t for example
 //vector length is unsigned integers so large vectors can cause issues with signed integers
 //also will probably rename xxxxx_cpp to xxxxx_ in the future, but I want to avoid re writing the same name for functions
+
+
+// helpers specifically for rcpp to pure cpp conversion
+namespace details {
+  constexpr double INV_SQRT_2PI = 0.39894228040143267793994605993438; // 1/sqrt(2*pi)
+  constexpr double LOG_SQRT_2PI = 0.91893853320467274178032973640562; // log(sqrt(2*pi))
+  inline double NaN() { return std::numeric_limits<double>::quiet_NaN(); }
+}
+
+
+
 
 typedef std::vector<std::vector<double>> matrix;
 
@@ -46,10 +61,7 @@ void reorder(std::vector<T>& vec, const std::vector<int>& order) {
 }
 */
 
-matrix subset_matrix_by_row_cpp(
-  const matrix& mat, 
-  const std::vector<int>& order
-  ) {
+matrix subset_matrix_by_row_cpp(const matrix& mat, const std::vector<int>& order) {
   int n = static_cast<int>(order.size());
   int p = static_cast<int>(mat[0].size());
   matrix result(n, std::vector<double>(p));
@@ -111,6 +123,217 @@ double sd_cpp(const std::vector<double>& vec) {
 }
 
 //bottom few functions are rewritten from R::(FUNCTION_NAME) to use vectors instead but R supports it's own math library so we add Boost math equivalents to help us with certain tougher functions to recreate like
+//added type swapping to boost accuracy in the lower decimal places for extreme values
+double dnorm_cpp(double x, bool logp){
+  return R::dnorm(x, 0.0, 1.0,logp ? 1:0);
+  /*double u = -0.5 * x * x;
+  if (logp) {
+      return u - details::LOG_SQRT_2PI;
+  } else {
+      return std::exp(u) * details::INV_SQRT_2PI;
+  }
+      */
+}
+
+double pnorm_cpp(double x, bool lower_tail, bool log_p){
+  return R::pnorm(x,0.0,1.0,lower_tail ? 1:0, log_p ? 1:0);
+  
+  /*
+  using ld = long double;
+  if (std::isnan(x)) return details::NaN();
+
+  static const bm::normal_distribution<ld> dist(0.0L,1.0L);
+
+  ld p;
+  if(lower_tail){
+    p = bm::cdf(dist, (ld)x);
+  } else {
+    p = bm::cdf(bm::complement(dist, (ld)x));
+  }
+
+  if(log_p){
+    return (double)std::log(p);
+  }
+  return (double)p;
+  */
+}
+
+double qnorm_cpp(double p, bool lower_tail, bool log_p){
+  return R::qnorm(p, 0.0, 1.0, lower_tail ? 1 : 0, log_p ? 1 : 0);
+  /*
+  using ld = long double;
+  if(std::isnan(p)) return details::NaN();
+  
+  ld pp;
+  static const bm::normal_distribution<ld> dist(0.0L,1.0L);
+
+  if (log_p) {
+    pp = std::exp((ld)p);
+  } 
+  else{
+    pp = (ld)p;
+  }
+
+  if ( !lower_tail ) {
+    pp = 1.0L - pp; // upper tail
+  }
+  
+  if(pp <= 0.0L) return -std::numeric_limits<double>::infinity();
+  if(pp >= 1.0L) return std::numeric_limits<double>::infinity();
+
+  ld quantile = bm::quantile(dist, pp);
+  return (double)quantile;
+  */
+}
+
+double dlogis_cpp(double x, bool log_p){
+  return R::dlogis(x, 0.0, 1.0, log_p ? 1 :0);
+  /*
+  if(log_p){
+    if(x >= 0.0){
+      return -x - 2.0 * std::log1p(std::exp(-x));
+    }
+    else{
+      return x - 2.0 * std::log1p(std::exp(x));
+    }
+  }
+  else{
+    if(x >= 0.0){
+      double e = std::exp(-x);
+      double denom = (1 + e);
+      return e / (denom*denom);
+    }
+    else{
+      double e = std::exp(x);
+      double denom = (1 + e);
+      return e / (denom*denom);
+    }
+  }
+    */
+}
+
+double plogis_cpp(double x, bool lower_tail, bool log_p){
+  return R::plogis(x, 0.0, 1.0, lower_tail ? 1:0, log_p ? 1: 0);
+  /*
+  if(log_p){
+    if(lower_tail){
+      if(x >= 0.0){
+        return -std::log1p(std::exp(-x));
+      }
+      else{
+        return x - std::log1p(std::exp(x));
+      }
+    }
+    else{
+      if(x <= 0.0){
+        return -std::log1p(std::exp(x));
+      }
+      else{
+        return -x - std::log1p(std::exp(-x));
+      }
+    }
+  }
+  else{
+    if(lower_tail){
+      if(x >= 0.0){
+        double e = std::exp(-x);
+        return 1.0 / (1.0 + e);
+      }
+      else{
+        double e = std::exp(x);
+        return e / (1.0 + e);
+      }
+    }
+    else{
+      if( x >= 0.0){
+        double e = std::exp(-x);
+        return e / (1.0 + e);
+      }
+      else{
+        double e = std::exp(x);
+        return 1.0 / (1.0 + e);
+      }
+    }
+  }
+    */
+}
+
+double pchisq_cpp(double x, double df, bool lower_tail, bool log_p){
+  return R::pchisq(x,df,lower_tail ? 1:0, log_p ? 1:0);
+  /*
+  using ld = long double;
+  if(!std::isfinite(df) || df <= 0){
+    //Rcpp::Rcout << "[pchisq]_cpp invalid df" << df << "x= " << x << std::endl;
+    return details::NaN();
+  }
+  if(std::isnan(x)) return details::NaN();
+
+  if(x < 0.0){
+    double prob = lower_tail ? 0.0 : 1.0;
+    return log_p ? std::log(prob) : prob;
+  }
+
+  if(!std::isfinite(x)){
+    double prob = lower_tail ? 1.0 : 0.0;
+    return log_p ? std::log(prob) : prob;
+  }
+
+  bm::chi_squared_distribution<ld> dist((ld)df);
+
+  ld p;
+  if(lower_tail){
+    p = bm::cdf(dist, (ld)x);
+  } else {
+    p = bm::cdf(bm::complement(dist, (ld)x));
+  }
+
+  if(log_p){
+    return (double)std::log(p);
+  }
+  else{
+    return (double)p;
+  }
+  */
+}
+
+double qchisq_cpp(double p, double df, bool lower_tail, bool log_p){
+  return R::qchisq(p,df,lower_tail ? 1 : 0, log_p ? 1:0);
+  /*
+  using ld = long double;
+  if(!std::isfinite(df) || df <= 0){
+    //Rcpp::Rcout << "[qchisq]_cpp invalid df" << df << std::endl;
+    return details::NaN();
+  }
+
+  if(std::isnan(p)) return details::NaN();
+  
+  ld pp;
+  if (log_p) {
+    pp = std::exp((ld)p);
+  } 
+  else{
+    pp = (ld)p;
+  }
+
+  if ( !lower_tail ) {
+    pp = 1.0L - pp; // upper tail
+  }
+  
+  if(pp <= 0.0L) return 0.0;
+  if(pp >= 1.0L) return std::numeric_limits<double>::infinity();
+
+  // Inverse of the chi-squared distribution
+  bm::chi_squared_distribution dist((ld)df);
+  ld quantile = bm::quantile(dist,pp);
+  return (double)quantile;
+  */
+}
+
+
+
+
+/*
+// iteration 1
 // qchisq
 // standard normal density (log-pdf if logp=true)
 double dnorm_cpp(double x, bool logp) {
@@ -137,6 +360,13 @@ double pnorm_cpp(double x, bool lower_tail, bool log_p) {
   //else return probability
   return c;
 }
+double pnorm_cpp(double x, bool lower_tail, bool log_p) {
+  const double y = 0.5 * std::erfc(-x * M_SQRT1_2); // M_SQRT1_2 is 1/sqrt(2)
+  double p = lower_tail ? y : 1.0 - y;
+  if(log_p){ return std::log(p); }
+  return p;
+}
+
 //uses inverse of the standard normal distribution (quantile stuff so we introduce boost::math::quantile)
 double qnorm_cpp(double p, bool lower_tail, bool log_p) {
   bm::normal_distribution<double> dist(0.0,1.0);
@@ -177,6 +407,24 @@ double plogis_cpp(double x, bool lower_tail, bool log_p){
 }
 
 double pchisq_cpp(double x, double df, bool lower_tail, bool log_p) {
+  //few base case checks to deal with special cases and to not crash the program incase infinite or zero values
+  if(!std::isfinite(df) || df <= 0){
+    Rcpp::Rcout << "[pchisq]_cpp invalid df" << df << "x= " << x << std::endl;
+    return NA_REAL;
+  }
+
+  if(std::isnan(x)) return NA_REAL;
+
+  if(x < 0.0){
+    double prob = lower_tail ? 0.0 : 1.0;
+    return log_p ? std::log(prob) : prob;
+  }
+  
+  if(!std::isfinite(x)){
+    double prob = lower_tail ? 1.0 : 0.0;
+    return log_p ? std::log(prob) : prob;
+  }
+
   bm::chi_squared dist(df);
   
   double c = bm::cdf(dist, x);
@@ -190,20 +438,25 @@ double pchisq_cpp(double x, double df, bool lower_tail, bool log_p) {
 }
 
 double qchisq_cpp(double p, double df, bool lower_tail, bool log_p) {
+  //base case checks
+  if(!std::isfinite(df) || df <= 0){
+    Rcpp::Rcout << "[qchisq]_cpp invalid df" << df << std::endl;
+    return NA_REAL;
+  }
+
+  if(std::isnan(p)) return NA_REAL;
+  
+  double q = log_p ? std::exp(p) : p;
+  if(!lower_tail) q = 1.0 - q;
+
+  if(q <= 0) return 0.0;
+  if(q >= 1.0) return std::numeric_limits<double>::infinity();
+
   // Inverse of the chi-squared distribution
   bm::chi_squared dist(df);
-
-  if (log_p) {
-    p = std::exp(p);
-  } 
-
-  if ( !lower_tail ) {
-    p = 1.0 - p; // upper tail
-  }
-  double quantile = bm::quantile(dist, p);
-  return quantile;
+  return bm::quantile(dist,q);
 }
-
+*/
 //bottom three are copies of the copies of the survival package from utilties.cpp but made to work with std::vectors
 // The following three utilities functions are from the survival package
 int cholesky2_cpp(std::vector<std::vector<double>>& matrix, int n, double toler) {

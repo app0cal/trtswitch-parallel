@@ -7,17 +7,9 @@ library(testthat)
 library(dplyr, warn.conflicts = FALSE)
 library(survival)
 
+
+
 test_that("tsesimp (weibull AFT): local tsesimp_mt matches CRAN tsesimp", {
-  # need callr to run the official one in a clean R process
-  if (!requireNamespace("callr", quietly = TRUE)) {
-    skip("callr not installed")
-  }
-  
-  # make sure your dev wrapper exists (exported or not)
-  if (!exists("tsesimp_mt", where = asNamespace("trtswitch"), inherits = FALSE)) {
-    skip("trtswitch::tsesimp_mt not found; build/export your wrapper first")
-  }
-  
   # data used by the package’s own tests / vignettes
   data("shilong", package = "trtswitch")
   
@@ -37,6 +29,8 @@ test_that("tsesimp (weibull AFT): local tsesimp_mt matches CRAN tsesimp", {
   
   shilong3 <- shilong1 %>%
     left_join(shilong2, by = c("bras.f", "id"))
+  
+  
   
   # common args for both
   common_args <- list(
@@ -60,17 +54,17 @@ test_that("tsesimp (weibull AFT): local tsesimp_mt matches CRAN tsesimp", {
     seed = 1L
   )
   
-  # official result from a clean R session using the CRAN version
+  # official result from the CRAN package
   official <- callr::r(function(args) {
     library(trtswitch)
     do.call(tsesimp, args)
   }, list(common_args))
   
-  # local result from your dev wrapper
+  # local result from local tsesimp version
   local <- do.call(trtswitch::tsesimp_mt, common_args)
   
   # compare (tight tolerance first)
-  tol <- 1e-4
+  tol <- 1e-6
   expect_equal(as.numeric(local$hr),     as.numeric(official$hr),     tolerance = tol)
   expect_equal(as.numeric(local$hr_CI),  as.numeric(official$hr_CI),  tolerance = tol)
   expect_equal(as.numeric(local$psi),    as.numeric(official$psi),    tolerance = tol)

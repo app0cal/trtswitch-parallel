@@ -86,6 +86,28 @@ int find_aft_index(const trial_data& d, const std::string& col_name) {
   return -1; // not found
 }
 
+NumericMatrix to_matrix(const std::vector<std::vector<double>>& matrix) {
+    int n_rows = matrix.size();
+    int n_cols = matrix.front().size();
+
+    //check for rectangle shape first to avoid issues
+    for(int row = 0; row < n_rows; row++){
+      int cols_here = matrix[row].size();
+      if(cols_here != n_cols){
+        stop("error in to_matrix");
+      }
+    }
+
+    NumericMatrix out(n_rows, n_cols);
+
+    for(int r = 0 ; r < n_rows; r++){
+      for(int c = 0; c < n_cols; c++){
+        out(r,c) = matrix[r][c];
+      }
+    }
+  return out;
+} 
+
 bool has_col_aft(const trial_data& d, const std::string& col_name) {
   if (col_name == "pps")     return !d.pps.empty();
   if (col_name == "event")    return !d.event.empty() && d.event.size() == d.pps.size();
@@ -189,7 +211,7 @@ std::vector<double> f_score_1_cpp(int p, std::vector<double> par, void *ex) {
         score[k] += wt*(u*u - 1);
       } else if (param->dist == "loglogistic") {
         double u = (std::log(param->tstop[person]) - eta[person])/sigma;
-        double c0 = 1 - 2*plogis_cpp(u,true);
+        double c0 = 1 - 2*plogis_cpp(u,true,false);
         double c1 = wt*c0;
         for (i=0; i<nvar; i++) {
           score[i] += c1*z[i];
@@ -204,7 +226,7 @@ std::vector<double> f_score_1_cpp(int p, std::vector<double> par, void *ex) {
         score[k] += wt*(u*u - 1);
       } else if (param->dist == "logistic") {
         double u = (param->tstop[person] - eta[person])/sigma;
-        double c0 = 1 - 2*plogis_cpp(u,true);
+        double c0 = 1 - 2*plogis_cpp(u,true,false);
         double c1 = wt*c0;
         for (i=0; i<nvar; i++) {
           score[i] += c1*z[i];
@@ -254,7 +276,7 @@ std::vector<double> f_score_1_cpp(int p, std::vector<double> par, void *ex) {
         double u = (param->tstop[person] - eta[person])/sigma;
         double v = (param->tstart[person] - eta[person])/sigma;
         double d1 = dnorm_cpp(v, false), d2 = dnorm_cpp(u, false);
-        double q1 = pnorm_cpp(v, true), q2 = pnorm_cpp(u, true);
+        double q1 = pnorm_cpp(v, false), q2 = pnorm_cpp(u, false);
         double c1 = wt*(d1 - d2)/(q1 - q2);
         for (i=0; i<nvar; i++) {
           score[i] += c1*z[i];
@@ -264,7 +286,7 @@ std::vector<double> f_score_1_cpp(int p, std::vector<double> par, void *ex) {
         double u = (param->tstop[person] - eta[person])/sigma;
         double v = (param->tstart[person] - eta[person])/sigma;
         double d1 = dlogis_cpp(v,false), d2 = dlogis_cpp(u,false);
-        double q1 = plogis_cpp(v,true), q2 = plogis_cpp(u,false);
+        double q1 = plogis_cpp(v,false), q2 = plogis_cpp(u,false);
         double c1 = wt*(d1 - d2)/(q1 - q2);
         for (i=0; i<nvar; i++) {
           score[i] += c1*z[i];
@@ -294,7 +316,7 @@ std::vector<double> f_score_1_cpp(int p, std::vector<double> par, void *ex) {
         score[k] += c1*u;
       } else if (param->dist == "loglogistic") {
         double u = (std::log(param->tstop[person]) - eta[person])/sigma;
-        double c1 = wt*(-plogis_cpp(u, true));
+        double c1 = wt*(-plogis_cpp(u, false));
         for (i=0; i<nvar; i++) {
           score[i] += c1*z[i];
         }
@@ -308,7 +330,7 @@ std::vector<double> f_score_1_cpp(int p, std::vector<double> par, void *ex) {
         score[k] += c1*u;
       } else if (param->dist == "logistic") {
         double u = (param->tstop[person] - eta[person])/sigma;
-        double c1 = wt*(-plogis_cpp(u, true));
+        double c1 = wt*(-plogis_cpp(u, false));
         for (i=0; i<nvar; i++) {
           score[i] += c1*z[i];
         }
@@ -330,7 +352,7 @@ std::vector<double> f_score_1_cpp(int p, std::vector<double> par, void *ex) {
         score[k] += c1*v;
       } else if (param->dist == "lognormal") {
         double v = (std::log(param->tstart[person]) - eta[person])/sigma;
-        double c1 = wt*(dnorm_cpp(v, false)/pnorm_cpp(v, true));
+        double c1 = wt*(dnorm_cpp(v, false)/pnorm_cpp(v, false));
         for (i=0; i<nvar; i++) {
           score[i] += c1*z[i];
         }
@@ -344,7 +366,7 @@ std::vector<double> f_score_1_cpp(int p, std::vector<double> par, void *ex) {
         score[k] += c1*v;
       } else if (param->dist == "normal") {
         double v = (param->tstart[person] - eta[person])/sigma;
-        double c1 = wt*(dnorm_cpp(v, false)/pnorm_cpp(v, true));
+        double c1 = wt*(dnorm_cpp(v, false)/pnorm_cpp(v, false));
         for (i=0; i<nvar; i++) {
           score[i] += c1*z[i];
         }
@@ -440,11 +462,11 @@ double f_llik_1_cpp(int p, std::vector<double> par, void *ex) {
       } else if (param->dist == "lognormal") {
         double u = (std::log(param->tstop[person]) - eta[person])/sigma;
         double v = (std::log(param->tstart[person]) - eta[person])/sigma;
-        loglik += wt*std::log(pnorm_cpp(v,true) - pnorm_cpp(u,true));
+        loglik += wt*std::log(pnorm_cpp(v,false) - pnorm_cpp(u,false));
       } else if (param->dist == "loglogistic") {
         double u = (std::log(param->tstop[person]) - eta[person])/sigma;
         double v = (std::log(param->tstart[person]) - eta[person])/sigma;
-        loglik += wt*std::log(plogis_cpp(v,true) - plogis_cpp(u,true));
+        loglik += wt*std::log(plogis_cpp(v,false) - plogis_cpp(u,false));
       } else if (param->dist == "normal") {
         double u = (param->tstop[person] - eta[person])/sigma;
         double v = (param->tstart[person] - eta[person])/sigma;
@@ -452,7 +474,7 @@ double f_llik_1_cpp(int p, std::vector<double> par, void *ex) {
       } else if (param->dist == "logistic") {
         double u = (param->tstop[person] - eta[person])/sigma;
         double v = (param->tstart[person] - eta[person])/sigma;
-        loglik += wt*std::log(plogis_cpp(v,true) - plogis_cpp(u,true));
+        loglik += wt*std::log(plogis_cpp(v,false) - plogis_cpp(u,false));
       }
     } else if (param->status[person] == 2) { // upper used as left censoring
       if (param->dist == "exponential" || param->dist == "weibull") {
@@ -460,16 +482,16 @@ double f_llik_1_cpp(int p, std::vector<double> par, void *ex) {
         loglik += wt*std::log(1.0 - std::exp(-std::exp(u)));
       } else if (param->dist == "lognormal") {
         double u = (std::log(param->tstop[person]) - eta[person])/sigma;
-        loglik += wt*std::log(pnorm_cpp(u,false));
+        loglik += wt*std::log(pnorm_cpp(u,true));
       } else if (param->dist == "loglogistic") {
         double u = (std::log(param->tstop[person]) - eta[person])/sigma;
-        loglik += wt*std::log(plogis_cpp(u,false));
+        loglik += wt*std::log(plogis_cpp(u,true));
       } else if (param->dist == "normal") {
         double u = (param->tstop[person] - eta[person])/sigma;
-        loglik += wt*std::log(pnorm_cpp(u,false));
+        loglik += wt*std::log(pnorm_cpp(u,true));
       } else if (param->dist == "logistic") {
         double u = (param->tstop[person] - eta[person])/sigma;
-        loglik += wt*std::log(plogis_cpp(u,false));
+        loglik += wt*std::log(plogis_cpp(u,true));
       }
     } else if (param->status[person] == 0) { // lower used as right censoring
       if (param->dist == "exponential" || param->dist == "weibull") {
@@ -477,16 +499,16 @@ double f_llik_1_cpp(int p, std::vector<double> par, void *ex) {
         loglik += wt*(-std::exp(v));
       } else if (param->dist == "lognormal") {
         double v = (std::log(param->tstart[person]) - eta[person])/sigma;
-        loglik += wt*std::log(pnorm_cpp(v,true));
+        loglik += wt*std::log(pnorm_cpp(v,false));
       } else if (param->dist == "loglogistic") {
         double v = (std::log(param->tstart[person]) - eta[person])/sigma;
-        loglik += wt*std::log(plogis_cpp(v,true));
+        loglik += wt*std::log(plogis_cpp(v,false));
       } else if (param->dist == "normal") {
         double v = (param->tstart[person] - eta[person])/sigma;
-        loglik += wt*std::log(pnorm_cpp(v,true));
+        loglik += wt*std::log(pnorm_cpp(v,false));
       } else if (param->dist == "logistic") {
         double v = (param->tstart[person] - eta[person])/sigma;
-        loglik += wt*std::log(plogis_cpp(v,true));
+        loglik += wt*std::log(plogis_cpp(v,false));
       }
     }
   }
@@ -563,7 +585,7 @@ std::vector<std::vector<double>> f_info_1_cpp(int p, std::vector<double> par, vo
         double u = (std::log(param->tstop[person]) - eta[person])/sigma;
         double c1 = wt*2*dlogis_cpp(u, false);
         double c2 = wt*(2*dlogis_cpp(u, false)*u +
-                        1 - 2*dlogis_cpp(u, true));
+                        1 - 2*plogis_cpp(u, true, false));
         for (i=0; i<nvar; i++) {
           for (j=0; j<=i; j++) {
             imat[i][j] += c1*z[i]*z[j];
@@ -589,7 +611,7 @@ std::vector<std::vector<double>> f_info_1_cpp(int p, std::vector<double> par, vo
         double u = (param->tstop[person] - eta[person])/sigma;
         double c1 = wt*2*dlogis_cpp(u, false);
         double c2 = wt*(2*dlogis_cpp(u, false)*u +
-                        1 - 2*dlogis_cpp(u, true));
+                        1 - 2*plogis_cpp(u, true, false));
         for (i=0; i<nvar; i++) {
           for (j=0; j<=i; j++) {
             imat[i][j] += c1*z[i]*z[j];
@@ -638,7 +660,7 @@ std::vector<std::vector<double>> f_info_1_cpp(int p, std::vector<double> par, vo
         double u = (std::log(param->tstop[person]) - eta[person])/sigma;
         double v = (std::log(param->tstart[person]) - eta[person])/sigma;
         double d1 = dnorm_cpp(v, false), d2 = dnorm_cpp(u, false);
-        double q1 = pnorm_cpp(v,true), q2 = pnorm_cpp(u, true);
+        double q1 = pnorm_cpp(v,false), q2 = pnorm_cpp(u, false);
         double c1 = wt*(std::pow((d1 - d2)/(q1 -  q2), 2) +
                         (-d1*v + d2*u)/(q1 - q2));
         double c2 = wt*((d1 - d2)*(d1*v - d2*u)/std::pow(q1 - q2, 2) +
@@ -657,7 +679,7 @@ std::vector<std::vector<double>> f_info_1_cpp(int p, std::vector<double> par, vo
         double u = (std::log(param->tstop[person]) - eta[person])/sigma;
         double v = (std::log(param->tstart[person]) - eta[person])/sigma;
         double d1 = dlogis_cpp(v, false), d2 = dlogis_cpp(u, false);
-        double q1 = plogis_cpp(v, true), q2 = plogis_cpp(u, true);
+        double q1 = plogis_cpp(v, false), q2 = plogis_cpp(u, false);
         double c1 = wt*(std::pow((d1 - d2)/(q1 - q2), 2) +
                         (d1*(2*q1-1) - d2*(2*q2-1))/(q1 - q2));
         double c2 = wt*((d1 - d2)*(d1*v - d2*u)/std::pow(q1 - q2, 2) +
@@ -816,7 +838,7 @@ std::vector<std::vector<double>> f_info_1_cpp(int p, std::vector<double> par, vo
         imat[k][k] += c2*v;
       } else if (param->dist == "lognormal") {
         double v = (std::log(param->tstart[person]) - eta[person])/sigma;
-        double d1 = dnorm_cpp(v,false), q1 = pnorm_cpp(v,true);
+        double d1 = dnorm_cpp(v,false), q1 = pnorm_cpp(v,false);
         double c1 = wt*(std::pow(d1/q1, 2) - d1*v/q1);
         double c2 = wt*(std::pow(d1/q1, 2)*v + d1*(1 - v*v)/q1);
         for (i=0; i<nvar; i++) {
@@ -1037,7 +1059,7 @@ std::vector<std::vector<double>> f_ressco_1_cpp(int p, std::vector<double> par, 
         resid[person][k] = c1*u;
       } else if (param->dist == "lognormal") {
         double u = (std::log(param->tstop[person]) - eta[person])/sigma;
-        double c1 = (-dnorm_cpp(u,false)/pnorm_cpp(u,false));
+        double c1 = (-dnorm_cpp(u,false)/pnorm_cpp(u,true));
         for (i=0; i<nvar; i++) {
           resid[person][i] = c1*z[i];
         }
@@ -1080,7 +1102,7 @@ std::vector<std::vector<double>> f_ressco_1_cpp(int p, std::vector<double> par, 
         resid[person][k] = c1*v;
       } else if (param->dist == "lognormal") {
         double v = (std::log(param->tstart[person]) - eta[person])/sigma;
-        double c1 = dnorm_cpp(v)/pnorm_cpp(v,false);
+        double c1 = dnorm_cpp(v,false)/pnorm_cpp(v,false);
         for (i=0; i<nvar; i++) {
           resid[person][i] = c1*z[i];
         }
@@ -1378,7 +1400,7 @@ f_der_eta_1_result f_der_eta_1_cpp(std::vector<double> eta, std::vector<double> 
         ddg[person] = -std::exp(u)/(sigma*sigma);
       } else if (param->dist == "lognormal") {
         double u = (std::log(param->tstop[person]) - eta[person])/sigma;
-        dg[person] = u/sigma;
+        dg[person] = u/sigma; 
         ddg[person] = -1/(sigma*sigma);
       } else if (param->dist == "loglogistic") {
         double u = (std::log(param->tstop[person]) - eta[person])/sigma;
@@ -1640,7 +1662,7 @@ double liferegplloop_cpp(int p, std::vector<double> par, void *ex,
 }
 
 
-// ##################[[Rcpp::export
+//[[Rcpp::export]]
 List lifereg_purecpp(
     //const DataFrame data expects trial_data with 
     const trial_data data,
@@ -1672,7 +1694,7 @@ List lifereg_purecpp(
   
   */
 
-  Rcpp::Rcout << "[lifereg_purecpp] line 1662" << std::endl;
+  //Rcpp::Rcout << "[lifereg_purecpp] line 1662" << std::endl;
 
   int h, i, j, k, n = data.pps.size(); //.nrows();
   //covarities is covarities_aft from the capture list!
@@ -1831,7 +1853,7 @@ List lifereg_purecpp(
       zn[i][j+1] = u[i];
     }
   }
-  Rcpp::Rcout << "[lifereg_purecpp] line 1843, after zn matrix construction" << std::endl;
+  //Rcpp::Rcout << "[lifereg_purecpp] line 1843, after zn matrix construction" << std::endl;
 
   std::vector<double> weightn(n, 1.0);
   //higher level wrapper does not pass anything for weight so we skip this temporarily
@@ -1941,24 +1963,8 @@ List lifereg_purecpp(
   std::vector<std::vector<double>> vbeta0(nreps*p, std::vector<double>(p,NAN)), rvbeta0(nreps*p, std::vector<double>(p,NAN));
   std::vector<double> lb0(nreps*p,NAN), ub0(nreps*p,NAN), prob0(nreps*p,NAN);
   std::vector<std::string> clparm0(nreps*p,"");
-  //print check statement
-  Rcpp::Rcout << "[lifereg_purecpp] line 1964, reached pragma parallelization" << std::endl;   // continues
-
-  //if the crash dissapears when its a single thread that means we can assume its a OMP Rcpp interaction issue
-  // for more notes about this specifically check below liferegpure_cpp function signature
-  //#if defined(_OPENMP)
-  //  omp_set_num_threads(1); // TEMP: make it single-threaded to confirm
-  //#endif
-  Rcpp::Rcout << "[lifereg_purecpp] line 1952 BIG CHECK n=" << n
-            << " nreps=" << nreps
-            << " nvar=" << nvar
-            << " nstrata=" << nstrata
-            << " p=" << p
-            << " beta0.len=" << (nreps*p) << std::endl;
-  //#pragma omp parallel for schedule(static) private(i,j,k)
+  
   for (h=0; h<nreps; h++) {
-    //these are declared bc each thread needs its own copy
-    //and we cannot use the outer scope variables directly
     bool fail = false;
     liferegloopresult out;
 
@@ -2151,22 +2157,22 @@ List lifereg_purecpp(
 
       //moved this labelling part here to run it before the fail check continues;
       for (i=0; i<p; i++) {
-      rep0[h*p+i] = h+1;
+        rep0[h*p+i] = h+1;
 
-      if (i==0) {
-        par0[h*p+i] = "(Intercept)";
-      } else if (i < nvar) {
-        par0[h*p+i] = covariates[i-1];
-      } else {
-        if (nstrata == 1) {
-          par0[h*p+i] = "Log(scale)";
+        if (i==0) {
+          par0[h*p+i] = "(Intercept)";
+        } else if (i < nvar) {
+          par0[h*p+i] = covariates[i-1];
         } else {
-          std::string str1 = "Log(scale ";
-          std::string str2 = ")";
-          par0[h*p+i] = str1 + std::to_string(i-nvar+1) + str2;
+          if (nstrata == 1) {
+            par0[h*p+i] = "Log(scale)";
+          } else {
+            std::string str1 = "Log(scale ";
+            std::string str2 = ")";
+            par0[h*p+i] = str1 + std::to_string(i-nvar+1) + str2;
+          }
         }
       }
-    }
 
       if(fail){ //throw error normally but we cant do that in a parallel loop
         niter[h] = out.iter;
@@ -2186,41 +2192,6 @@ List lifereg_purecpp(
 
     niter[h] = out.iter;
     fails[h] = out.fail;
-    //b = std::move(out.coef);
-    //vb = std::move(out.var);
-    //OPTIONAL: fit outputs for this h index with NaNs or Zeros
-    //if(out.fail) continue;
-    //b = out.coef;
-    //vb = out.var;
-    //std::vector<double> seb(p);
-    //for (j=0; j<p; j++) {
-      //seb[j] = std::sqrt(vb[j][j]);
-    //}
-
-    /*
-    for (i=0; i<p; i++) {
-      rep0[h*p+i] = h+1;
-
-      if (i==0) {
-        par0[h*p+i] = "(Intercept)";
-      } else if (i < nvar) {
-        par0[h*p+i] = covariates[i-1];
-      } else {
-        if (nstrata == 1) {
-          par0[h*p+i] = "Log(scale)";
-        } else {
-          std::string str1 = "Log(scale ";
-          std::string str2 = ")";
-          par0[h*p+i] = str1 + std::to_string(i-nvar+1) + str2;
-        }
-      }
-      //beta0[h*p+i] = b[i];
-      //sebeta0[h*p+i] = seb[i];
-      //for (j=0; j<p; j++) {
-      //  vbeta0[h*p+i][j] = vb[i][j];
-      //}
-    }*/
-
 
     if(out.fail){
       loglik0[h] = outint.loglik;
@@ -2380,60 +2351,66 @@ List lifereg_purecpp(
       loglik1[h] = out.loglik;
     }
   }
-  Rcpp::Rcout << "[lifereg_purecpp] line 2425, after parallel for loop" << std::endl;
+  //Rcpp::Rcout << "\t[lifereg_purecpp] line 2383, after parallel for loop" << std::endl;
 
   //end of parllel for loop so AFTER this line rcpp  
   // convert the vectors to Rcpp types
   //NumericVector expbeta0 = exp(beta0);
-  Rcpp::Rcout << "[liferegloop_cpp] beta0.size()=" << beta0.size() << std::endl;
+  //Rcpp::Rcout << "[liferegloop_cpp] beta0.size()=" << beta0.size() << std::endl;
   NumericVector expbeta0(beta0.size());
   for (size_t i=0; i<beta0.size(); i++) {
-    if (i < 5) Rcpp::Rcout << "beta0[" << i << "]=" << beta0[i] << std::endl;
+    //if (i < 5) Rcpp::Rcout << "beta0[" << i << "]=" << beta0[i] << std::endl;
     expbeta0[i] = std::exp(beta0[i]);
   }
 
-  Rcpp::Rcout << "[liferegloop_cpp] line 2434, expbeta0 done" << std::endl;
+  //Rcpp::Rcout << "[liferegloop_cpp] line 2395, expbeta0 done" << std::endl;
 
-  Rcpp::Rcout << "[liferegloop_cpp] line 2436, converting beta0, sebeta0, rsebeta0, z0 to NumericVector" << std::endl;
+  //Rcpp::Rcout << "[liferegloop_cpp] line 2397, converting beta0, sebeta0, rsebeta0, z0 to NumericVector" << std::endl;
   NumericVector beta0_r = NumericVector(beta0.begin(), beta0.end());
   NumericVector sebeta0_r = NumericVector(sebeta0.begin(), sebeta0.end());
   NumericVector rsebeta0_r = NumericVector(rsebeta0.begin(), rsebeta0.end());
   NumericVector z0(nreps*p);
-  Rcpp::Rcout << "[liferegloop_cpp] line 2441, beta0_r, sebeta0_r, rsebeta0_r done" << std::endl;
+  //Rcpp::Rcout << "[liferegloop_cpp] line 2402, beta0_r, sebeta0_r, rsebeta0_r done" << std::endl;
   if (!robust) z0 = beta0_r/sebeta0_r;
   else z0 = beta0_r/rsebeta0_r;
 
-  //these two bottom dataframes are the key outputs
+  //these two bottom dataframes are the key utputs
   // anything inside these dataframes must be in rcpp types so we convert our stl containers into rcpp types again
   // we can completely eradicate this part whenever we bootstrap phregcpp to make it return stl types instead of dataframes
   
   //for loop checking if data wrangling error
   for (size_t r = 0; r < vbeta0.size(); ++r) {
     if (vbeta0[r].size() != (size_t)p) {
-      Rcpp::stop("vbeta0 row %zu has length %zu, expected %d", r, vbeta0[r].size(), p);
+      Rcpp::stop("\t\tvbeta0 row %zu has length %zu, expected %d", r, vbeta0[r].size(), p);
     }
   }
-  Rcpp::Rcout << "[liferegloop_cpp] line 2451, wrapping start" << std::endl;
+  //Rcpp::Rcout << "\t[liferegloop_cpp] line 2416, wrapping start" << std::endl;
   //for sumstat
+
+  
   IntegerVector nobs_r = Rcpp::wrap(nobs);
   IntegerVector nevents_r = Rcpp::wrap(nevents);
   NumericVector loglik0_r = Rcpp::wrap(loglik0);
   NumericVector loglik1_r = Rcpp::wrap(loglik1);
   IntegerVector niter_r = Rcpp::wrap(niter);
+  //Rcpp::Rcout << "\t[liferegloop_cpp] line 2426, sumstat wrap done parest wrap start" << std::endl;
 
-  Rcpp::Rcout << "[liferegloop_cpp] line 2459, sumstat wrap done parest wrap start" << std::endl;
   //for parest
-  NumericMatrix vbeta0_r = Rcpp::wrap(vbeta0);
-  Rcpp::Rcout << "[liferegloop_cpp] line 2462, vbeta0_r wrap done" << std::endl;
+  //NumericMatrix vbeta0_r = Rcpp::wrap(vbeta0);
+  //Rcpp::Rcout << "[liferegloop_cpp] line 2462, vbeta0_r wrap done" << std::endl;
   StringVector par0_r = Rcpp::wrap(par0);
   NumericVector lb0_r = Rcpp::wrap(lb0);
   NumericVector ub0_r = Rcpp::wrap(ub0);
   NumericVector prob0_r = Rcpp::wrap(prob0);
   StringVector clparm0_r = Rcpp::wrap(clparm0);
-  NumericMatrix rvbeta0_r = Rcpp::wrap(rvbeta0);
+  //NumericMatrix rvbeta0_r = Rcpp::wrap(rvbeta0);
   LogicalVector fails_r = Rcpp::wrap(fails);
 
-  Rcpp::Rcout << "[liferegloop_cpp] line 2468, wrapping end" << std::endl;
+  //special cases because wrap is weird with matrices
+  NumericMatrix vbeta0_r = to_matrix(vbeta0);
+  NumericMatrix rvbeta0_r = to_matrix(rvbeta0);
+
+  //Rcpp::Rcout << "\t[liferegloop_cpp] line 2468, wrapping end" << std::endl;
   //end of conversion
   DataFrame sumstat = List::create(
     _["n"] = nobs_r,
@@ -2475,7 +2452,7 @@ List lifereg_purecpp(
       _["vbeta_naive"] = vbeta0_r);
   }
 
-  //we can ignore this bit because has_rep will ALWAYS be false from higher level wrapper logic
+  // reimplement this after checking numerical accuracy of output
   /*
   if (has_rep) {
     for (i=0; i<p_rep; i++) {

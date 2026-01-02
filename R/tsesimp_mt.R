@@ -296,7 +296,7 @@ tsesimp_mt <- function(data, id = "id", stratum = "", time = "time",
     varnames2 = ""
   }
   
-  out <- tsesimpcpp(
+  out <- tsesimpcpp_mt(
     data = df, id = id, stratum = stratum, time = time, 
     event = event, treat = treat, censor_time = censor_time, 
     pd = pd, pd_time = pd_time, swtrt = swtrt, 

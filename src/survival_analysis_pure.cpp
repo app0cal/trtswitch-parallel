@@ -159,15 +159,15 @@ inline const std::vector<double>& get_numeric_column(const trial_data& d, const 
 // score vector
 std::vector<double> f_score_1_cpp(int p, std::vector<double> par, void *ex) {
   aftparams_pure *param = (aftparams_pure *) ex;
-  int n = param->z.size();
-  int nvar = param->z[0].size();
+  int n = param-> nrows;
+  int nvar = param-> ncols;
   int person, i, k;
 
   std::vector<double> eta(n);
   for (person = 0; person < n; person++) {
     eta[person] = param->offset[person];
     for (i=0; i<nvar; i++) {
-      eta[person] += par[i]*param->z[person][i];
+      eta[person] += par[i]*param->z(person,i);
     }
   }
 
@@ -180,11 +180,15 @@ std::vector<double> f_score_1_cpp(int p, std::vector<double> par, void *ex) {
   }
 
   std::vector<double> score(p);
+  std::vector<double> z(nvar);
   for (person = 0; person < n; person++) {
     double wt = param->weight[person];
     double sigma = sig[person];
     //std::vector<double> z = (param->z[person] / sigma); //turned into the bottom 2 lines
-    std::vector<double> z = param->z[person];      // copy the row
+    //std::vector<double> z = param->z[person];      // copy the row
+    for (int jj = 0; jj < nvar; ++jj) {
+      z[jj] = param->z(person, jj);   // raw
+    }
     for (auto &v : z) v /= sigma;     
     k = param->strata[person] + nvar - 1;
 
@@ -409,15 +413,15 @@ std::vector<double> f_score_1_cpp(int p, std::vector<double> par, void *ex) {
 // log likelihood
 double f_llik_1_cpp(int p, std::vector<double> par, void *ex) {
   aftparams_pure *param = (aftparams_pure *) ex;
-  int n = param->z.size();
-  int nvar = param->z[0].size();
+  int n = param-> nrows; 
+  int nvar = param-> ncols; 
   int person, i, k;
 
   std::vector<double> eta(n);
   for (person = 0; person < n; person++) {
     eta[person] = param->offset[person];
     for (i=0; i<nvar; i++) {
-      eta[person] += par[i]*param->z[person][i];
+      eta[person] += par[i]*param->z(person,i);
     }
   }
 
@@ -519,15 +523,15 @@ double f_llik_1_cpp(int p, std::vector<double> par, void *ex) {
 // observed information matrix
 std::vector<std::vector<double>> f_info_1_cpp(int p, std::vector<double> par, void *ex) {
   aftparams_pure *param = (aftparams_pure *) ex;
-  int n = param->z.size();
-  int nvar = param->z[0].size();
+  int n = param -> nrows;
+  int nvar = param -> ncols;
   int person, i, j, k;
 
   std::vector<double> eta(n);
   for (person = 0; person < n; person++) {
     eta[person] = param->offset[person];
     for (i=0; i<nvar; i++) {
-      eta[person] += par[i]*param->z[person][i];
+      eta[person] += par[i]*param->z(person,i);
     }
   }
 
@@ -540,10 +544,15 @@ std::vector<std::vector<double>> f_info_1_cpp(int p, std::vector<double> par, vo
   }
 
   std::vector<std::vector<double>> imat(p,std::vector<double>(p,0.0));
+  std::vector<double> z(nvar);
   for (person = 0; person < n; person++) {
+    for (int jj = 0; jj < nvar; ++jj) {
+      z[jj] = param->z(person, jj);
+    }
     double wt = param->weight[person];
     double sigma = sig[person];
-    std::vector<double> z = param->z[person];
+    //std::vector<double> z = param->z[person];
+    
     for (auto& val : z) val /= sigma;
     k = param->strata[person] + nvar - 1;
 
@@ -908,15 +917,15 @@ std::vector<std::vector<double>> f_info_1_cpp(int p, std::vector<double> par, vo
 // score residual matrix
 std::vector<std::vector<double>> f_ressco_1_cpp(int p, std::vector<double> par, void *ex) {
   aftparams_pure *param = (aftparams_pure *) ex;
-  int n = param->z.size();
-  int nvar = param->z[0].size();
+  int n = param-> nrows;
+  int nvar = param-> ncols;
   int person, i, k;
 
   std::vector<double> eta(n);
   for (person = 0; person < n; person++) {
     eta[person] = param->offset[person];
     for (i=0; i<nvar; i++) {
-      eta[person] += par[i]*param->z[person][i];
+      eta[person] += par[i]*param->z(person,i);
     }
   }
 
@@ -929,12 +938,24 @@ std::vector<std::vector<double>> f_ressco_1_cpp(int p, std::vector<double> par, 
   }
 
   std::vector<std::vector<double>> resid(n, std::vector<double>(p));
+
+  std::vector<double> z(nvar); // re use buffer :D
   for (person = 0; person < n; person++) {
-    double sigma = sig[person];
+    
+    /*double sigma = sig[person];
     std::vector<double> z = param->z[person];
     for(double &v : z) {
       v /= sigma;
     }
+    k = param->strata[person] + nvar - 1; */
+    double sigma = sig[person];
+    if (!std::isfinite(sigma) || sigma == 0.0) sigma = 1e-12;
+
+    // fill reusable scaled row buffer once
+    for (int ii = 0; ii < nvar; ++ii) {
+      z[ii] = param->z(person, ii) / sigma;
+    }
+
     k = param->strata[person] + nvar - 1;
 
     if (param->status[person] == 1) { // event
@@ -1138,7 +1159,7 @@ std::vector<std::vector<double>> f_ressco_1_cpp(int p, std::vector<double> par, 
 // substitute information matrix guaranteed to be positive definite
 std::vector<std::vector<double>> f_jj_1_cpp(int p, std::vector<double> par, void *ex) {
   aftparams_pure *param = (aftparams_pure *) ex;
-  int n = param->z.size();
+  int n = param-> nrows;
   int person, i, j;
 
   std::vector<std::vector<double>> resid = f_ressco_1_cpp(p, par, param);
@@ -1168,18 +1189,20 @@ liferegloopresult liferegloop_cpp(int p, std::vector<double> par, void *ex,
   bool fail;
 
   int nstrata = param -> nstrata;
-  int nsub = static_cast<int>(param -> z.size()); // reminder that z is a vector so grabbing the .size() gives size_t not int, not a massive difference 
-  int nvar = static_cast<int>(param -> z[0].size()); // important
-  std::vector<std::vector<double>> z1 = param -> z;
+  int nsub = static_cast<int>(param -> nrows); // reminder that z is a vector so grabbing the .size() gives size_t not int, not a massive difference 
+  int nvar = static_cast<int>(param -> ncols); // important
+  //std::vector<std::vector<double>> z1 = param -> z;
+  //anywhere z1 is called use params -> z(index1, index2)
 
   // standardize the design matrix
   std::vector<double> mu(nvar, 0.0), sigma(nvar, 1.0);
-  std::vector<std::vector<double>> z2(nsub, std::vector<double>(nvar, 0.0));
+  //std::vector<std::vector<double>> z2(nsub, std::vector<double>(nvar, 0.0));
+  MatrixRM z2{ nsub, nvar, std::vector<double>((size_t)nsub * nvar, 0.0) };
 
   for (i=0; i<nvar; i++) {
     std::vector<double> u(nsub);
     for (j=0; j < nsub; j++) {
-      u[j] = z1[j][i];
+      u[j] = param -> z(j,i);
     }
 
     bool binary = std::all_of(u.begin(), u.end(), [](double val) { return val == 0 || val == 1; });
@@ -1196,7 +1219,7 @@ liferegloopresult liferegloop_cpp(int p, std::vector<double> par, void *ex,
 
   for(int i = 0; i < nsub; i++) {
     for (j=0; j < nvar; j++) {
-      z2[i][j] = (z1[i][j] - mu[j]) / sigma[j];
+      z2(i,j) = (param -> z(i,j) - mu[j]) / sigma[j];
     }
   }
 
@@ -1213,8 +1236,26 @@ liferegloopresult liferegloop_cpp(int p, std::vector<double> par, void *ex,
     }
   }
   
-  aftparams_pure para = {param->dist, param->strata, param->tstart, param->tstop,
-                    param->status, param->weight, param->offset, z2, nstrata};
+  //aftparams_pure para = {param->dist, param->strata, param->tstart, param->tstop,
+  //                  param->status, param->weight, param->offset, nstrata, z2};
+  // Identity map
+  std::vector<int> rows2(nsub);
+  for (int i = 0; i < nsub; ++i) rows2[i] = i;
+
+  aftparams_pure para;
+  para.dist   = param->dist;
+  para.strata = param->strata;
+  para.tstart = param->tstart;
+  para.tstop  = param->tstop;
+  para.status = param->status;
+  para.weight = param->weight;
+  para.offset = param->offset;
+  para.nstrata = nstrata;
+
+  para.zbase = &z2;
+  para.rows  = &rows2;
+  para.nrows = nsub;
+  para.ncols = nvar;
 
   double toler = 1e-12;
   double newlk = -1.0;
@@ -1384,140 +1425,7 @@ liferegloopresult liferegloop_cpp(int p, std::vector<double> par, void *ex,
                       50, 1.0e-9);
 
 */
-// first and second derivatives of log likelihood with respect to eta
-f_der_eta_1_result f_der_eta_1_cpp(std::vector<double> eta, std::vector<double> sig, void *ex) {
-  aftparams_pure *param = (aftparams_pure *) ex;
-  int n = param->z.size();
-  int person;
 
-  std::vector<double> dg(n), ddg(n);
-  for (person = 0; person < n; person++) {
-    double sigma = sig[person];
-    if (param->status[person] == 1) { // event
-      if (param->dist == "exponential" || param->dist == "weibull") {
-        double u = (std::log(param->tstop[person]) - eta[person])/sigma;
-        dg[person] = -(1 - std::acosf(u))/sigma;
-        ddg[person] = -std::exp(u)/(sigma*sigma);
-      } else if (param->dist == "lognormal") {
-        double u = (std::log(param->tstop[person]) - eta[person])/sigma;
-        dg[person] = u/sigma; 
-        ddg[person] = -1/(sigma*sigma);
-      } else if (param->dist == "loglogistic") {
-        double u = (std::log(param->tstop[person]) - eta[person])/sigma;
-        dg[person] = (1 - 2*plogis_cpp(u,false))/sigma;
-        ddg[person] = -2*dlogis_cpp(u,false)/(sigma*sigma);
-      } else if (param->dist == "normal") {
-        double u = (param->tstop[person] - eta[person])/sigma;
-        dg[person] = u/sigma;
-        ddg[person] = -1/(sigma*sigma);
-      } else if (param->dist == "logistic") {
-        double u = (param->tstop[person] - eta[person])/sigma;
-        dg[person] = (1 - 2*plogis_cpp(u,false))/sigma;
-        ddg[person] = -2*dlogis_cpp(u,false)/(sigma*sigma);
-      }
-    } else if (param->status[person] == 3) { // interval censoring
-      if (param->dist == "exponential" || param->dist == "weibull") {
-        double u = (std::log(param->tstop[person]) - eta[person])/sigma;
-        double v = (std::log(param->tstart[person]) - eta[person])/sigma;
-        double w1 = std::exp(v), w2 = std::exp(u);
-        double q1 = std::exp(-w1), q2 = std::exp(-w2);
-        double d1 = w1*q1, d2 = w2*q2;
-        dg[person] = (d1 - d2)/(q1 - q2)/sigma;
-        ddg[person] = -(d1*(1-w1) - d2*(1-w2))/(q1 - q2)/(sigma*sigma) - 
-          std::pow(dg[person], 2);
-      } else if (param->dist == "lognormal") {
-        double u = (std::log(param->tstop[person]) - eta[person])/sigma;
-        double v = (std::log(param->tstart[person]) - eta[person])/sigma;
-        double d1 = dnorm_cpp(v,false), d2 = dnorm_cpp(u,false);
-        double q1 = pnorm_cpp(v,false), q2 = pnorm_cpp(u,false);
-        dg[person] = (d1 - d2)/(q1 - q2)/sigma;
-        ddg[person] = (d1*v - d2*u)/(q1 - q2)/(sigma*sigma) - 
-          std::pow(dg[person], 2);
-      } else if (param->dist == "loglogistic") {
-        double u = (std::log(param->tstop[person]) - eta[person])/sigma;
-        double v = (std::log(param->tstart[person]) - eta[person])/sigma;
-        double d1 = dlogis_cpp(v,false), d2 = dlogis_cpp(u,false);
-        double q1 = plogis_cpp(v,false), q2 = plogis_cpp(u,false);
-        dg[person] = (d1 - d2)/(q1 - q2)/sigma;
-        ddg[person] = -(d1*(2*q1-1) - d2*(2*q2-1))/(q1 - q2)/(sigma*sigma) - 
-          std::pow(dg[person], 2);
-      } else if (param->dist == "normal") {
-        double u = (param->tstop[person] - eta[person])/sigma;
-        double v = (param->tstart[person] - eta[person])/sigma;
-        double d1 = dnorm_cpp(v,false), d2 = dnorm_cpp(u,false);
-        double q1 = pnorm_cpp(v,false), q2 = pnorm_cpp(u,false);
-        dg[person] = (d1 - d2)/(q1 - q2)/sigma;
-        ddg[person] = (d1*v - d2*u)/(q1 - q2)/(sigma*sigma) - 
-          std::pow(dg[person], 2);
-      } else if (param->dist == "logistic") {
-        double u = (param->tstop[person] - eta[person])/sigma;
-        double v = (param->tstart[person] - eta[person])/sigma;
-        double d1 = dlogis_cpp(v,false), d2 = dlogis_cpp(u,false);
-        double q1 = plogis_cpp(v,false), q2 = plogis_cpp(u,false);
-        dg[person] = (d1 - d2)/(q1 - q2)/sigma;
-        ddg[person] = -(d1*(2*q1-1) - d2*(2*q2-1))/(q1 - q2)/(sigma*sigma) - 
-          std::pow(dg[person], 2);
-      }
-    } else if (param->status[person] == 2) { // upper used as left censoring
-      if (param->dist == "exponential" || param->dist == "weibull") {
-        double u = (std::log(param->tstop[person]) - eta[person])/sigma;
-        dg[person] = -std::exp(u - std::exp(u))/(1 - std::exp(-std::exp(u)))/sigma;
-        ddg[person] = (1 - std::exp(u) - std::exp(-std::exp(u)))*std::exp(u - std::exp(u))/
-          std::pow((1 - std::exp(-std::exp(u)))*sigma, 2);
-      } else if (param->dist == "lognormal") {
-        double u = (std::log(param->tstop[person]) - eta[person])/sigma;
-        dg[person] = -dnorm_cpp(u,false)/pnorm_cpp(u,false)/sigma;
-        ddg[person] = -u*dnorm_cpp(u,false)/
-          (pnorm_cpp(u,true)*sigma*sigma) - std::pow(dg[person], 2);
-      } else if (param->dist == "loglogistic") {
-        double u = (std::log(param->tstop[person]) - eta[person])/sigma;
-        dg[person] = -plogis_cpp(u,false)/sigma;
-        ddg[person] = -dlogis_cpp(u,false)/(sigma*sigma);
-      } else if (param->dist == "normal") {
-        double u = (param->tstop[person] - eta[person])/sigma;
-        dg[person] = -dnorm_cpp(u,false)/pnorm_cpp(u,true)/sigma;
-        ddg[person] = -u*dnorm_cpp(u,false)/
-          (pnorm_cpp(u,true)*sigma*sigma) - std::pow(dg[person], 2);
-      } else if (param->dist == "logistic") {
-        double u = (param->tstop[person] - eta[person])/sigma;
-        dg[person] = -plogis_cpp(u,false)/sigma;
-        ddg[person] = -dlogis_cpp(u,false)/(sigma*sigma);
-      }
-    } else if (param->status[person] == 0) { // lower used as right censoring
-      if (param->dist == "exponential" || param->dist == "weibull") {
-        double v = (std::log(param->tstart[person]) - eta[person])/sigma;
-        dg[person] = std::exp(v)/sigma;
-        ddg[person] = -std::exp(v)/(sigma*sigma);
-      } else if (param->dist == "lognormal") {
-        double v = (std::log(param->tstart[person]) - eta[person])/sigma;
-        dg[person] = dnorm_cpp(v,false)/pnorm_cpp(v,false)/sigma;
-        ddg[person] = v*dnorm_cpp(v,false)/
-          (pnorm_cpp(v,false)*sigma*sigma) - std::pow(dg[person], 2);
-      } else if (param->dist == "loglogistic") {
-        double v = (std::log(param->tstart[person]) - eta[person])/sigma;
-        dg[person] = plogis_cpp(v,true)/sigma;
-        ddg[person] = -dlogis_cpp(v,false)/(sigma*sigma);
-      } else if (param->dist == "normal") {
-        double v = (param->tstart[person] - eta[person])/sigma;
-        dg[person] = dnorm_cpp(v,false)/pnorm_cpp(v,false)/sigma;
-        ddg[person] = v*dnorm_cpp(v,false)/
-          (pnorm_cpp(v,false)*sigma*sigma) - std::pow(dg[person], 2);
-      } else if (param->dist == "logistic") {
-        double v = (param->tstart[person] - eta[person])/sigma;
-        dg[person] = plogis_cpp(v,true)/sigma;
-        ddg[person] = -dlogis_cpp(v,false)/(sigma*sigma);
-      }
-    }
-  }
-  f_der_eta_1_result res;
-  res.dg = dg;
-  res.ddg = ddg;
-  /*List result = List::create(
-    Named("dg") = dg,
-    Named("ddg") = ddg);
-  */
-  return res;
-}
 
 // confidence limit of profile likelihood method
 double liferegplloop_cpp(int p, std::vector<double> par, void *ex,
@@ -1838,10 +1746,17 @@ List lifereg_purecpp(
   }
 
 
-  std::vector<std::vector<double>> zn(n, std::vector<double>(nvar, 0.0));
+  //std::vector<std::vector<double>> zn(n, std::vector<double>(nvar, 0.0));
+  /* Experimental Change
+  - Turning the matrix from a 2D vector into a contigous array can help performance when multi-threading is enabled, 
+  (would not recommend turning every single into types of MatrixRMs)
+  */
+  MatrixRM zn{n, nvar, std::vector<double>((size_t)n*nvar,0.0)};
   for (int i=0; i<n; i++) {
-    zn[i][0] = 1; // intercept
+    zn(i,0) = 1; // intercept
   }
+  std::vector<int> row_idx(n);
+  for (int i = 0; i < n; ++i) row_idx[i] = i;
 
   for (j=0; j < nvar - 1; j++) {
     std::string zj = covariates[j];
@@ -1850,7 +1765,7 @@ List lifereg_purecpp(
     }
     const std::vector<double>& u = get_numeric_column(data,zj);
     for (i=0; i<n; i++) {
-      zn[i][j+1] = u[i];
+      zn(i,j+1) = u[i];
     }
   }
   //Rcpp::Rcout << "[lifereg_purecpp] line 1843, after zn matrix construction" << std::endl;
@@ -1909,7 +1824,9 @@ List lifereg_purecpp(
   reorder(weightn,order);
   reorder(offsetn,order);
   reorder(idn,order);
-  zn = subset_matrix_by_row_cpp(zn, order);
+  //zn = subset_matrix_by_row_cpp(zn, order);
+  //replaced with
+  reorder(row_idx,order);
 
   // exclude observations with missing valuesbeca
   std::vector<bool> sub(n,1);
@@ -1919,14 +1836,21 @@ List lifereg_purecpp(
         (std::isnan(weightn[i])) || (std::isnan(offsetn[i])) )//||
         //(idn[i] == NA_INTEGER)) 
         {
-      sub[i] = 0;
+      sub[i] = false;
+      continue;
     }
+    // covariate NA checks: use original row in zn via row_idx
+    int r = row_idx[i];
     for (j=0; j<nvar-1; j++) {
-      if (std::isnan(zn[i][j+1])) sub[i] = 0;
+      if (std::isnan(zn(r,j+1))){ 
+        sub[i] = false;
+        break;
+      }
     }
   }
 
   //order = which_cpp
+  /* replace w bottom to better reflect ideas
   order = which_true(sub);
   reorder(repn,order);
   reorder(stratumn,order);
@@ -1936,8 +1860,28 @@ List lifereg_purecpp(
   reorder(weightn,order);
   reorder(offsetn,order);
   reorder(idn,order);
-  zn = subset_matrix_by_row_cpp(zn, order);
+  RowIndexView zn_view{&zn, &order};
   n = sum_bool_cpp(sub);
+  */
+  std::vector<int> keep = which_true(sub);
+
+  repn     = subset_by_idx(repn, keep);
+  stratumn = subset_by_idx(stratumn, keep);
+  timen    = subset_by_idx(timen, keep);
+  time2n   = subset_by_idx(time2n, keep);
+  eventn   = subset_by_idx(eventn, keep);
+  weightn  = subset_by_idx(weightn, keep);
+  offsetn  = subset_by_idx(offsetn, keep);
+  idn      = subset_by_idx(idn, keep);
+
+  // NEW: subset row mapping
+  row_idx  = subset_by_idx(row_idx, keep);
+
+  n = (int)keep.size();
+  if (n == 0) {
+    // fail early (no data left)
+    Rcpp::stop("All observations filtered out due to missing values.");
+  }
 
   // identify the locations of the unique values of rep
   std::vector<int> idx(1,0);
@@ -1946,6 +1890,7 @@ List lifereg_purecpp(
       idx.push_back(i);
     }
   }
+  RowIndexView zn_view{ &zn, &row_idx };
 
   int nreps = static_cast<int>(idx.size());
   idx.push_back(n);
@@ -1978,7 +1923,10 @@ List lifereg_purecpp(
     std::vector<double> weight1 = subset_by_idx(weightn, q1);
     std::vector<double> offset1 = subset_by_idx(offsetn, q1);
     std::vector<int> id1 = subset_by_idx(idn, q1);
-    std::vector<std::vector<double>> z1 = subset_matrix_by_row_cpp(zn, q1);
+    //std::vector<std::vector<double>> z1 = subset_matrix_by_row_cpp(zn, q1);
+    int start = idx[h];
+    int len   = idx[h+1] - idx[h];
+    RowRangeViewT<RowIndexView> z1{ &zn_view, start, len };
 
     // unify right censored data with interval censored data
     std::vector<double> tstart(n1), tstop(n1);
@@ -2032,7 +1980,17 @@ List lifereg_purecpp(
       weight1 = subset_by_idx(weight1, q2);
       offset1 = subset_by_idx(offset1, q2);
       id1 = subset_by_idx(id1, q2);
-      z1 = subset_matrix_by_row_cpp(z1,q2);
+      //z1 = subset_matrix_by_row_cpp(z1,q2);
+      std::vector<int> rep_rows;              // original zn rows for the rep block
+      rep_rows.reserve(len);
+      for (int t = start; t < start + len; ++t) rep_rows.push_back(row_idx[t]);
+
+      // now filter within the rep block:
+      std::vector<int> rep_rows2;
+      rep_rows2.reserve(q2.size());
+      for (int k : q2) rep_rows2.push_back(rep_rows[k]);
+
+      //RowIndexView z1{ &zn, &rep_rows2 };
     }
 
     // intercept only model
@@ -2077,10 +2035,33 @@ List lifereg_purecpp(
       }
     }
 
-    // last left off here
     // parameter estimates and standard errors for the null model
-    aftparams_pure param = {dist1, stratum1, tstart, tstop, status, weight1,
-                          offset1, z1, nstrata};
+    //aftparams_pure param = {dist1, stratum1, tstart, tstop, status, weight1,
+    //                      offset1, nstrata, z1};
+    //int start = idx[h];
+    //int len   = idx[h+1] - idx[h];
+
+    // Build mapping from local rep row i -> original zn row
+    std::vector<int> rows1;
+    rows1.reserve(len);
+    for (int t = start; t < start + len; ++t) {
+      rows1.push_back(row_idx[t]);   // row_idx maps filtered/sorted row -> original zn row
+    }
+
+    aftparams_pure param;
+    param.dist   = dist1;
+    param.strata = std::move(stratum1);
+    param.tstart = std::move(tstart);
+    param.tstop  = std::move(tstop);
+    param.status = std::move(status);
+    param.weight = std::move(weight1);
+    param.offset = std::move(offset1);
+    param.nstrata = nstrata;
+
+    param.zbase = &zn;
+    param.rows  = &rows1;
+    param.nrows = len;      // or n2 after q2 filtering
+    param.ncols = nvar;     // p? careful: nvar for covariates, p for full parameter length; z cols should be nvar
 
     liferegloopresult outint = liferegloop_cpp(p, bint0, &param, maxiter, eps,
                               colfit0, ncolfit0);
@@ -2119,9 +2100,9 @@ List lifereg_purecpp(
         for(int i = 0; i < n2; i++){
           for(int j = 0; j < nvar; j++){
             for(int k = 0; k < nvar; k++){
-              v1[j][k] += weight1[i] * (z1[i][j] * z1[i][k]);
+              v1[j][k] += weight1[i] * (z1(i,j) * z1(i,k));
             }
-            u1[j] += weight1[i] * z1[i][j] * y1[i];
+            u1[j] += weight1[i] * z1(i,j) * y1[i];
           }
         }
 
@@ -2140,7 +2121,12 @@ List lifereg_purecpp(
         if(dist1 != "exponential"){
           double s = 0.0;
           for(i = 0; i < n2; i++){
-            double pred = std::inner_product(z1[i].begin(), z1[i].end(), u1.begin(), 0.0);
+            //double pred = std::inner_product(z1[i].begin(), z1[i].end(), u1.begin(), 0.0);
+            //change bc of the view replacement
+            double pred = 0.0;
+            for (int j = 0; j < nvar; ++j) {
+              pred += z1(i, j) * u1[j];
+            }
             double r = y1[i] - pred;
             s += weight1[i] * r * r;
           }

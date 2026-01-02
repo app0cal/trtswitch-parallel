@@ -1,5 +1,6 @@
 #include <vector>
 #include <string>
+#include "utilities_pure.h"
 
 //structs to tightly connect every process in this function, to extend this or enable other features simply edit these or 
 //what we get sent from out test dummy of tsesimp_test.cpp
@@ -36,8 +37,18 @@ struct aftparams_pure {
   std::vector<int> status;
   std::vector<double> weight;
   std::vector<double> offset;
-  std::vector<std::vector<double>> z;
   int nstrata;
+  //std::vector<std::vector<double>> z;
+  // replaced w experimental view for better performance
+  const MatrixRM* zbase = nullptr;
+  const std::vector<int>* rows = nullptr; // mapping
+  int nrows = 0, ncols = 0;
+
+  double z(int i, int j) const {
+    return (*zbase)((*rows)[i], j);
+  }
+  
+  
 };
 
 struct liferegloopresult{

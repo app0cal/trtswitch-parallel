@@ -38,10 +38,6 @@ namespace details {
 
 
 
-
-typedef std::vector<std::vector<double>> matrix;
-
-
 std::vector<int> seq_cpp(int start, int end) {
   if(end < start) return {};
   int len = end - start + 1;
@@ -61,7 +57,7 @@ void reorder(std::vector<T>& vec, const std::vector<int>& order) {
   }
 }
 */
-
+/*
 matrix subset_matrix_by_row_cpp(const matrix& mat, const std::vector<int>& order) {
   if(order.empty()){
     if(mat.empty()) return {};
@@ -95,6 +91,7 @@ matrix subset_matrix_by_row_cpp(const matrix& mat, const std::vector<int>& order
   }
   return result;
 }
+  */
 
 // sum_bool_cpp for boolean vectors
 int sum_bool_cpp(const std::vector<bool>& vec) {

@@ -12,7 +12,41 @@
 #include <boost/math/distributions/chi_squared.hpp>
 
 //all functions here are just the signatures so no code is needed
-typedef std::vector<std::vector<double>> matrix;
+
+struct MatrixRM {
+  //Row Major Matrix (R uses Column major but this works pretty well for our code)
+  int rows=0, cols=0;
+  std::vector<double> a; // row-major: size rows*cols
+
+  double& operator()(int r,int c)       { return a[(size_t)r*cols + c]; }
+  double  operator()(int r,int c) const { return a[(size_t)r*cols + c]; }
+};
+
+struct RowIndexView {
+  const MatrixRM* base = nullptr;
+  const std::vector<int>* idx = nullptr;
+
+  int rows() const { return (int)idx->size(); }
+  int cols() const { return base->cols; }
+
+  double operator()(int r,int c) const {
+    return (*base)((*idx)[r], c);
+  }
+};
+
+template <class ZMat>
+struct RowRangeViewT {
+  const ZMat* base = nullptr;
+  int start = 0, len = 0;
+
+  int rows() const { return len; }
+  int cols() const { return base->cols(); }
+
+  double operator()(int r, int c) const {
+    return (*base)(start + r, c);
+  }
+};
+
 
 namespace bm = boost::math;
 std::vector<int> seq_cpp(
@@ -26,11 +60,11 @@ void reorder(
     const std::vector<int>& order
 );
 */
-
-matrix subset_matrix_by_row_cpp(
-    const matrix& mat,
+/*
+std::vector<std::vector<double>> subset_matrix_by_row_cpp(
+    const std::vector<std::vector<double>>& mat,
     const std::vector<int>& order
-);
+); */
 
 template<typename T>
 void reorder(std::vector<T>& vec, const std::vector<int>& order) {

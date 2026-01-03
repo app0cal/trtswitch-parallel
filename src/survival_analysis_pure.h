@@ -59,11 +59,6 @@ struct liferegloopresult{
   bool fail;
 };
 
-struct f_der_eta_1_result {
-  std::vector<double> dg;
-  std::vector<double> ddg;
-};
-
 
 /*Function Signatures:
 
@@ -131,12 +126,6 @@ liferegloopresult liferegloop_cpp(
   double eps,
   std::vector<int> colfit, 
   int ncolfit
-);
-
-f_der_eta_1_result f_der_eta_1_cpp(
-  std::vector<double> eta, 
-  std::vector<double> sig, 
-  void *ex
 );
 
 double liferegplloop_cpp(

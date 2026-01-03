@@ -5,13 +5,15 @@
 #include <vector>
 #include <string>
 #include <cmath>
+#include <limits>
 //these bottom three are introduced to replace the r method calls that use more complicated math functions
 #include <boost/math/distributions/normal.hpp>
 #include <boost/math/distributions/complement.hpp>
 #include <boost/math/distributions/logistic.hpp>
 #include <boost/math/distributions/chi_squared.hpp>
+#include <boost/math/special_functions/erf.hpp>    // erfc, erfc_inv
+#include <boost/math/special_functions/gamma.hpp>  // gamma_p/q and inverses
 
-#include <limits>
 
 #include <Rmath.h>
 
@@ -29,13 +31,54 @@ The main idea is to keep the pipeline of data processing similar to the original
 //also will probably rename xxxxx_cpp to xxxxx_ in the future, but I want to avoid re writing the same name for functions
 
 
-// helpers specifically for rcpp to pure cpp conversion
-namespace details {
-  constexpr double INV_SQRT_2PI = 0.39894228040143267793994605993438; // 1/sqrt(2*pi)
-  constexpr double LOG_SQRT_2PI = 0.91893853320467274178032973640562; // log(sqrt(2*pi))
+namespace details_pure {
   inline double NaN() { return std::numeric_limits<double>::quiet_NaN(); }
-}
+  inline bool is_nan(double x) { return std::isnan(x); }
+  inline bool is_finite(double x) { return std::isfinite(x); }
 
+  // constants (long double for internal accuracy)
+  constexpr long double LOG_SQRT_2PI = 0.9189385332046727417803297364056176398614L; // 0.5*log(2*pi)
+  constexpr long double SQRT2 = 1.4142135623730950488016887242096980785697L;
+
+  // Convert an input (p, lower_tail, log_p) into a tail probability without cancellation.
+  // Returns probability in [0,1]. If invalid -> NaN.
+  inline long double prob_from(double p, bool lower_tail, bool log_p) {
+    if (is_nan(p)) return std::numeric_limits<long double>::quiet_NaN();
+
+    long double pp;
+    if (log_p) {
+      // R semantics: log_p means p is log(probability)
+      // exp(p) is safe; but if we need 1-exp(p), use -expm1(p).
+      long double lp = static_cast<long double>(p);
+      if (lp > 0.0L) return std::numeric_limits<long double>::quiet_NaN(); // log(prob) cannot be > 0
+      if (lower_tail) {
+        pp = std::expl(lp);
+      } else {
+        // upper tail prob = exp(lp) (already upper tail), but for conversions where we want lower tail
+        // caller should decide; so here we interpret p as the requested tail prob already.
+        pp = std::expl(lp);
+      }
+    } else {
+      pp = static_cast<long double>(p);
+    }
+
+    if (!(pp >= 0.0L && pp <= 1.0L)) return std::numeric_limits<long double>::quiet_NaN();
+    return pp;
+  }
+
+  // Compute 1 - exp(x) accurately for x near 0
+  inline long double one_minus_exp(long double x) {
+    // 1 - exp(x) = -expm1(x)
+    return -std::expm1(x);
+  }
+
+  inline double log_prob_01(long double p) {
+    if (p <= 0.0L) return -std::numeric_limits<double>::infinity();
+    if (p >= 1.0L) return 0.0;
+    return static_cast<double>(std::log(p));
+  }
+} // namespace details_pure
+using namespace details_pure;
 
 
 std::vector<int> seq_cpp(int start, int end) {
@@ -48,52 +91,8 @@ std::vector<int> seq_cpp(int start, int end) {
   }
   return v;
 }
-/*
-template<typename T>
-void reorder(std::vector<T>& vec, const std::vector<int>& order) {
-  std::vector<T> old = vec;
-  for (size_t i = 0; i < order.size(); ++i) {
-    vec[i] = old[order[i]];
-  }
-}
-*/
-/*
-matrix subset_matrix_by_row_cpp(const matrix& mat, const std::vector<int>& order) {
-  if(order.empty()){
-    if(mat.empty()) return {};
-    return std::vector<std::vector<double>>{};
-  }
-  if(mat.empty()){
-    return {};
-  }
 
-  int n = static_cast<int>(order.size());
-  int p = static_cast<int>(mat[0].size());
-  
-  #ifndef NDEBUG
-  for (int r = 0; r < n; ++r) {
-    if (static_cast<int>(mat[r].size()) != p) {
-      throw std::runtime_error("subset_matrix_by_row_cpp: ragged matrix");
-    }
-  }
-  for (int idx : order) {
-    if (idx < 0 || idx >= n) {
-      throw std::out_of_range("subset_matrix_by_row_cpp: row index OOB");
-    }
-  }
-  #endif
-
-  matrix result(n, std::vector<double>(p));
-  for (int i = 0; i < n; ++i) {
-    for (int j = 0; j < p; ++j) {
-      result[i][j] = mat[order[i]][j];
-    }
-  }
-  return result;
-}
-  */
-
-// sum_bool_cpp for boolean vectors
+// grabs however many are true inside of a bool vector
 int sum_bool_cpp(const std::vector<bool>& vec) {
   int total = 0;
   for (size_t i = 0; i < vec.size(); ++i) {
@@ -104,6 +103,7 @@ int sum_bool_cpp(const std::vector<bool>& vec) {
   return total;
 }
 
+// calculates the mean in a vector
 double mean_cpp(const std::vector<double>& vec) {
     if(vec.empty()) {
         throw std::invalid_argument("Mean is not defined for empty vector");
@@ -115,6 +115,7 @@ double mean_cpp(const std::vector<double>& vec) {
     return total / static_cast<double>(vec.size());
 }
 
+// sums the values in a vector
 double sum_cpp(const std::vector<double>& vec) {
     double total = 0.0;
     for (const auto& val : vec) {
@@ -123,6 +124,7 @@ double sum_cpp(const std::vector<double>& vec) {
     return total;
 }
 
+// gets the standard deviation in a vector
 double sd_cpp(const std::vector<double>& vec) {
     if(vec.empty()) {
         throw std::invalid_argument("Standard deviation is not defined for empty vector");
@@ -145,338 +147,223 @@ double sd_cpp(const std::vector<double>& vec) {
 //bottom few functions are rewritten from R::(FUNCTION_NAME) to use vectors instead but R supports it's own math library so we add Boost math equivalents to help us with certain tougher functions to recreate like
 //added type swapping to boost accuracy in the lower decimal places for extreme values
 double dnorm_cpp(double x, bool logp){
-  return R::dnorm(x, 0.0, 1.0,logp ? 1:0);
-  /*double u = -0.5 * x * x;
-  if (logp) {
-      return u - details::LOG_SQRT_2PI;
-  } else {
-      return std::exp(u) * details::INV_SQRT_2PI;
-  }
-      */
+  
+  if (is_nan(x)) return NaN();
+  if (!is_finite(x)) return logp ? -std::numeric_limits<double>::infinity() : 0.0;
+
+  long double xx = static_cast<long double>(x);
+  long double logdens = -0.5L * xx * xx - LOG_SQRT_2PI;
+  if (logp) return static_cast<double>(logdens);
+  return static_cast<double>(std::expl(logdens));
 }
 
 double pnorm_cpp(double x, bool lower_tail, bool log_p){
-  return R::pnorm(x,0.0,1.0,lower_tail ? 1:0, log_p ? 1:0);
-  
-  /*
-  using ld = long double;
-  if (std::isnan(x)) return details::NaN();
+  if (is_nan(x)) return NaN();
 
-  static const bm::normal_distribution<ld> dist(0.0L,1.0L);
+  if (x == -std::numeric_limits<double>::infinity()) {
+    double p = lower_tail ? 0.0 : 1.0;
+    return log_p ? (p == 0.0 ? -std::numeric_limits<double>::infinity() : 0.0) : p;
+  }
+  if (x == std::numeric_limits<double>::infinity()) {
+    double p = lower_tail ? 1.0 : 0.0;
+    return log_p ? (p == 0.0 ? -std::numeric_limits<double>::infinity() : 0.0) : p;
+  }
 
-  ld p;
-  if(lower_tail){
-    p = bm::cdf(dist, (ld)x);
+  long double xx = static_cast<long double>(x);
+
+  // lower tail: 0.5*erfc(-x/sqrt2)
+  long double lt = 0.5L * boost::math::erfc(-xx / SQRT2);
+  // upper tail: 0.5*erfc(+x/sqrt2)
+  long double ut = 0.5L * boost::math::erfc( xx / SQRT2);
+
+  if (!log_p) {
+    return static_cast<double>(lower_tail ? lt : ut);
+  }
+
+  // log_p case: use complement for values near 1
+  if (lower_tail) {
+    // log(lt) stable when lt small; when lt ~ 1 use log1p(-ut)
+    if (xx > 0.0L) {
+      return static_cast<double>(std::log1p(-ut));
+    } else {
+      return static_cast<double>(std::log(lt));
+    }
   } else {
-    p = bm::cdf(bm::complement(dist, (ld)x));
+    // log(ut) stable when ut small; when ut ~ 1 use log1p(-lt)
+    if (xx < 0.0L) {
+      return static_cast<double>(std::log1p(-lt));
+    } else {
+      return static_cast<double>(std::log(ut));
+    }
   }
-
-  if(log_p){
-    return (double)std::log(p);
-  }
-  return (double)p;
-  */
 }
 
 double qnorm_cpp(double p, bool lower_tail, bool log_p){
-  return R::qnorm(p, 0.0, 1.0, lower_tail ? 1 : 0, log_p ? 1 : 0);
-  /*
-  using ld = long double;
-  if(std::isnan(p)) return details::NaN();
-  
-  ld pp;
-  static const bm::normal_distribution<ld> dist(0.0L,1.0L);
+  if (is_nan(p)) return NaN();
 
+  // Interpret p as the requested tail probability directly.
+  // If log_p, p is log(tail_prob). If !log_p, p is tail_prob.
+  long double tp;
   if (log_p) {
-    pp = std::exp((ld)p);
-  } 
-  else{
-    pp = (ld)p;
+    long double lp = static_cast<long double>(p);
+    if (lp > 0.0L) return NaN();
+    tp = std::expl(lp);
+  } else {
+    tp = static_cast<long double>(p);
   }
 
-  if ( !lower_tail ) {
-    pp = 1.0L - pp; // upper tail
-  }
-  
-  if(pp <= 0.0L) return -std::numeric_limits<double>::infinity();
-  if(pp >= 1.0L) return std::numeric_limits<double>::infinity();
+  if (!(tp >= 0.0L && tp <= 1.0L)) return NaN();
+  if (tp == 0.0L) return lower_tail ? -std::numeric_limits<double>::infinity()
+                                    :  std::numeric_limits<double>::infinity();
+  if (tp == 1.0L) return lower_tail ?  std::numeric_limits<double>::infinity()
+                                    : -std::numeric_limits<double>::infinity();
 
-  ld quantile = bm::quantile(dist, pp);
-  return (double)quantile;
-  */
+  // Use tail-specific inversion via erfc_inv:
+  // lower tail prob = 0.5*erfc(-x/sqrt2) => x = -sqrt2 * erfc_inv(2p)
+  // upper tail prob = 0.5*erfc( x/sqrt2) => x =  sqrt2 * erfc_inv(2p)
+  long double x;
+  try {
+    long double arg = 2.0L * tp;
+    long double inv = boost::math::erfc_inv(arg);
+    x = (lower_tail ? -SQRT2 : SQRT2) * inv;
+  } catch (...) {
+    return NaN();
+  }
+  return static_cast<double>(x);
 }
 
 double dlogis_cpp(double x, bool log_p){
-  return R::dlogis(x, 0.0, 1.0, log_p ? 1 :0);
-  /*
-  if(log_p){
-    if(x >= 0.0){
+  if (is_nan(x)) return NaN();
+  if (!is_finite(x)) return log_p ? -std::numeric_limits<double>::infinity() : 0.0;
+
+  // Stable versions (your commented formulas were good)
+  if (log_p) {
+    if (x >= 0.0) {
       return -x - 2.0 * std::log1p(std::exp(-x));
+    } else {
+      return  x - 2.0 * std::log1p(std::exp( x));
     }
-    else{
-      return x - 2.0 * std::log1p(std::exp(x));
-    }
-  }
-  else{
-    if(x >= 0.0){
+  } else {
+    if (x >= 0.0) {
       double e = std::exp(-x);
-      double denom = (1 + e);
-      return e / (denom*denom);
-    }
-    else{
+      double denom = 1.0 + e;
+      return e / (denom * denom);
+    } else {
       double e = std::exp(x);
-      double denom = (1 + e);
-      return e / (denom*denom);
+      double denom = 1.0 + e;
+      return e / (denom * denom);
     }
   }
-    */
 }
 
 double plogis_cpp(double x, bool lower_tail, bool log_p){
-  return R::plogis(x, 0.0, 1.0, lower_tail ? 1:0, log_p ? 1: 0);
-  /*
-  if(log_p){
-    if(lower_tail){
-      if(x >= 0.0){
-        return -std::log1p(std::exp(-x));
-      }
-      else{
-        return x - std::log1p(std::exp(x));
-      }
-    }
-    else{
-      if(x <= 0.0){
-        return -std::log1p(std::exp(x));
-      }
-      else{
-        return -x - std::log1p(std::exp(-x));
-      }
-    }
+  if (is_nan(x)) return NaN();
+
+  if (x == -std::numeric_limits<double>::infinity()) {
+    double p = lower_tail ? 0.0 : 1.0;
+    return log_p ? (p == 0.0 ? -std::numeric_limits<double>::infinity() : 0.0) : p;
   }
-  else{
-    if(lower_tail){
-      if(x >= 0.0){
+  if (x == std::numeric_limits<double>::infinity()) {
+    double p = lower_tail ? 1.0 : 0.0;
+    return log_p ? (p == 0.0 ? -std::numeric_limits<double>::infinity() : 0.0) : p;
+  }
+
+  if (log_p) {
+    // Stable log(cdf) / log(1-cdf)
+    if (lower_tail) {
+      if (x >= 0.0) return -std::log1p(std::exp(-x));
+      else          return  x - std::log1p(std::exp( x));
+    } else {
+      if (x <= 0.0) return -std::log1p(std::exp( x));
+      else          return -x - std::log1p(std::exp(-x));
+    }
+  } else {
+    // Stable cdf / ccdf
+    if (lower_tail) {
+      if (x >= 0.0) {
         double e = std::exp(-x);
         return 1.0 / (1.0 + e);
-      }
-      else{
+      } else {
         double e = std::exp(x);
         return e / (1.0 + e);
       }
-    }
-    else{
-      if( x >= 0.0){
+    } else {
+      if (x >= 0.0) {
         double e = std::exp(-x);
         return e / (1.0 + e);
-      }
-      else{
+      } else {
         double e = std::exp(x);
         return 1.0 / (1.0 + e);
       }
     }
   }
-    */
 }
 
 double pchisq_cpp(double x, double df, bool lower_tail, bool log_p){
-  return R::pchisq(x,df,lower_tail ? 1:0, log_p ? 1:0);
-  /*
-  using ld = long double;
-  if(!std::isfinite(df) || df <= 0){
-    //Rcpp::Rcout << "[pchisq]_cpp invalid df" << df << "x= " << x << std::endl;
-    return details::NaN();
-  }
-  if(std::isnan(x)) return details::NaN();
+  if (is_nan(x) || is_nan(df)) return NaN();
+  if (!is_finite(df) || df <= 0.0) return NaN();
 
-  if(x < 0.0){
-    double prob = lower_tail ? 0.0 : 1.0;
-    return log_p ? std::log(prob) : prob;
+  if (x < 0.0) {
+    double p = lower_tail ? 0.0 : 1.0;
+    return log_p ? (p == 0.0 ? -std::numeric_limits<double>::infinity() : 0.0) : p;
+  }
+  if (x == std::numeric_limits<double>::infinity()) {
+    double p = lower_tail ? 1.0 : 0.0;
+    return log_p ? (p == 0.0 ? -std::numeric_limits<double>::infinity() : 0.0) : p;
   }
 
-  if(!std::isfinite(x)){
-    double prob = lower_tail ? 1.0 : 0.0;
-    return log_p ? std::log(prob) : prob;
-  }
+  long double a  = static_cast<long double>(df) / 2.0L;
+  long double xx = static_cast<long double>(x)  / 2.0L;
 
-  bm::chi_squared_distribution<ld> dist((ld)df);
-
-  ld p;
-  if(lower_tail){
-    p = bm::cdf(dist, (ld)x);
-  } else {
-    p = bm::cdf(bm::complement(dist, (ld)x));
+  try {
+    // Use gamma_q for complement stability when needed
+    long double q = boost::math::gamma_q(a, xx); // upper tail
+    if (!log_p) {
+      long double p = lower_tail ? (1.0L - q) : q;
+      return static_cast<double>(p);
+    } else {
+      if (lower_tail) return static_cast<double>(std::log1p(-q)); // log(1-q)
+      else            return static_cast<double>(std::log(q));
+    }
+  } catch (...) {
+    return NaN();
   }
-
-  if(log_p){
-    return (double)std::log(p);
-  }
-  else{
-    return (double)p;
-  }
-  */
 }
 
 double qchisq_cpp(double p, double df, bool lower_tail, bool log_p){
-  return R::qchisq(p,df,lower_tail ? 1 : 0, log_p ? 1:0);
-  /*
-  using ld = long double;
-  if(!std::isfinite(df) || df <= 0){
-    //Rcpp::Rcout << "[qchisq]_cpp invalid df" << df << std::endl;
-    return details::NaN();
-  }
+  if (is_nan(p) || is_nan(df)) return NaN();
+  if (!is_finite(df) || df <= 0.0) return NaN();
 
-  if(std::isnan(p)) return details::NaN();
-  
-  ld pp;
+  // p is the requested tail prob (lower or upper depending on lower_tail flag)
+  long double tp;
   if (log_p) {
-    pp = std::exp((ld)p);
-  } 
-  else{
-    pp = (ld)p;
-  }
-
-  if ( !lower_tail ) {
-    pp = 1.0L - pp; // upper tail
-  }
-  
-  if(pp <= 0.0L) return 0.0;
-  if(pp >= 1.0L) return std::numeric_limits<double>::infinity();
-
-  // Inverse of the chi-squared distribution
-  bm::chi_squared_distribution dist((ld)df);
-  ld quantile = bm::quantile(dist,pp);
-  return (double)quantile;
-  */
-}
-
-
-
-
-/*
-// iteration 1
-// qchisq
-// standard normal density (log-pdf if logp=true)
-double dnorm_cpp(double x, bool logp) {
-  static const double SQRT2PI = std::sqrt(2 * M_PI);
-  double u = -0.5 * x * x;
-  if (logp) {
-      return u - std::log(SQRT2PI);
+    long double lp = static_cast<long double>(p);
+    if (lp > 0.0L) return NaN();
+    tp = std::expl(lp);
   } else {
-      return std::exp(u) / SQRT2PI;
+    tp = static_cast<long double>(p);
+  }
+
+  if (!(tp >= 0.0L && tp <= 1.0L)) return NaN();
+  if (tp == 0.0L) return 0.0; // matches typical R behavior for qchisq(0, df)
+  if (tp == 1.0L) return std::numeric_limits<double>::infinity();
+
+  long double a = static_cast<long double>(df) / 2.0L;
+
+  try {
+    // Avoid cancellation: use tail-specific inverse
+    long double xhalf = lower_tail
+      ? boost::math::gamma_p_inv(a, tp)  // solves gamma_p(a, x) = tp
+      : boost::math::gamma_q_inv(a, tp); // solves gamma_q(a, x) = tp (upper tail)
+
+    long double x = 2.0L * xhalf;
+    return static_cast<double>(x);
+  } catch (...) {
+    return NaN();
   }
 }
 
-// standard normal CDF Φ(x) 
-double pnorm_cpp(double x, bool lower_tail, bool log_p) {
-  double c = 0.5 * (1.0 + std::erf(x / std::sqrt(2.0)));
-  if (!lower_tail) {
-    c = 1.0 - c; // upper tail
-  }
 
-  if(log_p) {
-    return std::log(c); // log probability
-  }
-
-  //else return probability
-  return c;
-}
-double pnorm_cpp(double x, bool lower_tail, bool log_p) {
-  const double y = 0.5 * std::erfc(-x * M_SQRT1_2); // M_SQRT1_2 is 1/sqrt(2)
-  double p = lower_tail ? y : 1.0 - y;
-  if(log_p){ return std::log(p); }
-  return p;
-}
-
-//uses inverse of the standard normal distribution (quantile stuff so we introduce boost::math::quantile)
-double qnorm_cpp(double p, bool lower_tail, bool log_p) {
-  bm::normal_distribution<double> dist(0.0,1.0);
-  if (log_p) {
-    p = std::exp(p);
-  } 
-  if ( !lower_tail ) {
-    p = 1.0 - p; // upper tail
-  }
-  double quantile = bm::quantile(dist, p);
-  return quantile;
-}
-
-//these two below don't have log_p
-// standard logistic density (log-pdf if logp=true)
-double dlogis_cpp(double x, bool log_p) {
-  // f(x) = exp(-x)/(1+exp(-x))^2
-  double e = std::exp(-x);
-  if (log_p) {
-      return -x - 2.0 * std::log1p(e);
-  } else {
-      double denom = (1 + e);
-      return e / (denom*denom);
-  }
-}
-
-// standard logistic CDF F(x) = 1/(1+exp(-x))
-double plogis_cpp(double x, bool lower_tail, bool log_p){
-  double c = 1.0 / (1.0 + std::exp(-x));
-  if(!lower_tail){
-    c = 1.0 - c; // upper tail
-  }
-  if (log_p) {
-    return std::log(c); // log probability branch
-  }
-
-  return c;
-}
-
-double pchisq_cpp(double x, double df, bool lower_tail, bool log_p) {
-  //few base case checks to deal with special cases and to not crash the program incase infinite or zero values
-  if(!std::isfinite(df) || df <= 0){
-    Rcpp::Rcout << "[pchisq]_cpp invalid df" << df << "x= " << x << std::endl;
-    return NA_REAL;
-  }
-
-  if(std::isnan(x)) return NA_REAL;
-
-  if(x < 0.0){
-    double prob = lower_tail ? 0.0 : 1.0;
-    return log_p ? std::log(prob) : prob;
-  }
-  
-  if(!std::isfinite(x)){
-    double prob = lower_tail ? 1.0 : 0.0;
-    return log_p ? std::log(prob) : prob;
-  }
-
-  bm::chi_squared dist(df);
-  
-  double c = bm::cdf(dist, x);
-  if (!lower_tail) {
-    c = 1.0 - c; // upper tail
-  }
-  if (log_p) {
-    return std::log(c); // log probability branch
-  }
-  return c;
-}
-
-double qchisq_cpp(double p, double df, bool lower_tail, bool log_p) {
-  //base case checks
-  if(!std::isfinite(df) || df <= 0){
-    Rcpp::Rcout << "[qchisq]_cpp invalid df" << df << std::endl;
-    return NA_REAL;
-  }
-
-  if(std::isnan(p)) return NA_REAL;
-  
-  double q = log_p ? std::exp(p) : p;
-  if(!lower_tail) q = 1.0 - q;
-
-  if(q <= 0) return 0.0;
-  if(q >= 1.0) return std::numeric_limits<double>::infinity();
-
-  // Inverse of the chi-squared distribution
-  bm::chi_squared dist(df);
-  return bm::quantile(dist,q);
-}
-*/
 //bottom three are copies of the copies of the survival package from utilties.cpp but made to work with std::vectors
 // The following three utilities functions are from the survival package
 int cholesky2_cpp(std::vector<std::vector<double>>& matrix, int n, double toler) {

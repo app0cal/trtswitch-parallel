@@ -2,6 +2,39 @@
 #include <string>
 #include "utilities_pure.h"
 
+// tsesimp structs to be used
+struct RepResult {
+  double psi0hat = NA_REAL, psi0lower = NA_REAL, psi0upper = NA_REAL;
+  double psi1hat = NA_REAL, psi1lower = NA_REAL, psi1upper = NA_REAL;
+  double hrhat   = NA_REAL, hrlower   = NA_REAL, hrupper   = NA_REAL;
+  double pvalue  = NA_REAL;
+  int fail = 0;
+};
+
+struct BaseInputs {
+  int n = 0;
+  int p = 0;     // baseline cov count for Cox
+  int p2 = 0;    // baseline cov count for AFT block
+  bool has_stratum = false;
+  int p_stratum = 0;
+
+  // core columns (std::vector only)
+  std::vector<int> id;
+  std::vector<int> stratum;      // "ustratum" indexing
+  std::vector<double> time;
+  std::vector<int> event;
+  std::vector<int> treat;
+  std::vector<double> censor_time;
+  std::vector<int> pd;
+  std::vector<double> pd_time;
+  std::vector<int> swtrt;
+  std::vector<double> swtrt_time;
+
+  // covariates as C++ row-major matrix (thread-safe)
+  MatrixRM zb;        // n x p
+  MatrixRM zb_aft;    // n x (q+p2) or whatever you currently use
+};
+
 //structs to tightly connect every process in this function, to extend this or enable other features simply edit these or 
 //what we get sent from out test dummy of tsesimp_test.cpp
 struct trial_data {
@@ -59,7 +92,62 @@ struct liferegloopresult{
   bool fail;
 };
 
+struct coxdata {
+  std::vector<double> time;     // t_star
+  std::vector<int> event;       // d_star
+  std::vector<int> stratum;     // length n,nullptr if none
+  std::vector<double> x;        // row-major n*p 
+  int n;
+  int p;
 
+  //OPTIONAL
+  std::vector<double> time2;     // empty -> none
+  std::vector<double> weights; // empty -> none
+  std::vector<double> offset; // empty -> none
+  std::vector<int> id; // empty -> none
+};
+
+struct coxparams_purecpp {
+  int n = 0;
+
+  const std::vector<int>* stratum = nullptr;
+  const std::vector<double>* tstart = nullptr;
+  const std::vector<double>* tstop  = nullptr;
+  const std::vector<int>* event     = nullptr;
+  const std::vector<double>* weight = nullptr;
+  const std::vector<double>* offset = nullptr;
+
+  // This is your “X matrix” view (row-reordered)
+  RowIndexViewView z;
+
+  // The row traversal order used by the math routines (e.g., order1/order1x)
+  const std::vector<int>* order = nullptr;
+
+  int method = 0; // ties: 0=breslow, 1=efron (your code)
+};
+
+struct PhregFit {
+  std::vector<double> coef;   // length p
+  int iter = 0;
+  std::vector<double> var;    // row-major p*p
+  double loglik = NAN;
+  bool fail = false;
+};
+
+struct phregLoopOut {
+  std::vector<double> coef;  // size p
+  int iter = 0;
+  MatrixRM var;              // p x p
+  double loglik = std::numeric_limits<double>::quiet_NaN();
+  bool fail = false;
+};
+
+struct coxfitout {
+  bool fail;
+  std::vector<double> beta;     // size p (here p=1 for treated, or more if you include more covars)
+  std::vector<double> sebeta;   // size p
+  std::vector<double> p;        // size p (optional)
+};
 /*Function Signatures:
 
 Notes:
@@ -79,6 +167,8 @@ STL to_std(
 group_index group_by(
   const std::vector<std::string>& factor
 );
+
+double f_llik_2(int p, std::vector<double> par, void *ex);
 
 bool has_col_aft(const trial_data& d, const std::string& col_name);
 
@@ -157,6 +247,21 @@ List lifereg_purecpp(
   const double alpha,
   const int maxiter,
   const double eps
+);
+
+List phreg_purecpp(
+  const coxdata data,
+  const std::vector<std::string> covariates,
+  const std::string ties,
+  const std::vector<double>& init,
+  const bool robust,
+  const bool est_basehaz,
+  const bool est_resid,
+  const bool firth,
+  const bool plci,
+  const double alpha,
+  const int maxiter,
+  const double eps 
 );
 
 template<typename STL, typename RCPPTYPE>

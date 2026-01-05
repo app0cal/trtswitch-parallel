@@ -334,6 +334,14 @@ List tsesimpcpp_mt(const DataFrame data,
     covariates[j+1] = zj;
     zn(_,j) = u;
   }
+
+  // ADDED AS PART OF THE PURE CPP VERSION
+  std::vector<std::string> cov_names_cox;
+  cov_names_cox.reserve((size_t)1 + (size_t)p);
+  cov_names_cox.push_back("treated");
+  for (int j = 0; j < p; ++j) {
+    cov_names_cox.push_back(Rcpp::as<std::string>(base_cov[j]));
+  }
   
   // covariates for the accelerated failure time model for control with pd
   // including stratum and base2_cov
@@ -422,7 +430,7 @@ List tsesimpcpp_mt(const DataFrame data,
   auto f = [&k, data, has_stratum, stratum, p_stratum, u_stratum, 
             treat, treatwi, treatwn, treatwc, id, idwi, idwn, idwc,
             n, q, p, p2, covariates, covariates_aft, dist, 
-            recensor, swtrt_control_only, alpha, zcrit, ties, offset](
+            recensor, swtrt_control_only, alpha, zcrit, ties, offset,cov_names_cox](
                 IntegerVector& idb, IntegerVector& stratumb, 
                 NumericVector& timeb, IntegerVector& eventb, 
                 IntegerVector& treatb, NumericVector& censor_timeb, 
@@ -497,7 +505,7 @@ List tsesimpcpp_mt(const DataFrame data,
                     }
                   }
                   
-                  DataFrame data_outcome;
+                  //DataFrame data_outcome;
                   
                   // treat arms that include patients who switched treatment
                   IntegerVector treats(1);
@@ -657,26 +665,51 @@ List tsesimpcpp_mt(const DataFrame data,
                     }
                   }
                   
-                  
+                  DataFrame data_outcome_r;
                   // Cox model for hypothetical treatment effect estimate
-                  data_outcome = DataFrame::create(
+                  data_outcome_r = DataFrame::create(
                     Named("uid") = idb,
                     Named("t_star") = t_star,
                     Named("d_star") = d_star,
                     Named("treated") = treatb);
                   
-                  data_outcome.push_back(stratumb, "ustratum");
+                  data_outcome_r.push_back(stratumb, "ustratum");
                   
                   for (j=0; j<p; j++) {
                     String zj = covariates[j+1];
                     NumericVector u = zb(_,j);
-                    data_outcome.push_back(u, zj);
+                    data_outcome_r.push_back(u, zj);
                   }
-                  
+                  /*
                   List fit_outcome = phregcpp(
                     data_outcome, "", "ustratum", "t_star", "", "d_star",
                     covariates, "", "", "", ties, init, 
                     0, 0, 0, 0, 0, alpha, 50, 1.0e-9);
+                  */
+                 
+                  //
+                  coxdata data_outcome;
+                  List fit_outcome;
+                  data_outcome.n = t_star.size();
+                  data_outcome.p = 1 + zb.ncol(); // + 1 bc it gives n of columns and we want to iterate over p 
+
+                  data_outcome.time = to_std<std::vector<double>>(t_star);
+                  data_outcome.event = to_std<std::vector<int>>(d_star);
+                  data_outcome.stratum = to_std<std::vector<int>>(stratumb);
+                  // Pack x row-major: [treated | zb]
+                  data_outcome.x.resize((size_t)data_outcome.n * (size_t)data_outcome.p);
+
+                  for (int i = 0; i < data_outcome.n; ++i) {
+                    data_outcome.x[(size_t)i * data_outcome.p + 0] = (double)treatb[i];   // treated is column 0
+                    for (int j = 0; j < p; ++j) {
+                      data_outcome.x[(size_t)i * data_outcome.p + (size_t)(1 + j)] = zb(i, j);
+                    }
+                  }
+
+                  if(true){
+                    fit_outcome = phreg_purecpp(data_outcome,cov_names_cox,ties,{},
+                                                0,0,0,0,0,alpha,50,1.0e-9);
+                  }
 
                   DataFrame sumstat_cox = DataFrame(fit_outcome["sumstat"]);
                   bool fail_cox = sumstat_cox["fail"];
@@ -696,7 +729,7 @@ List tsesimpcpp_mt(const DataFrame data,
                     out = List::create(
                       Named("data_aft") = data_aft,
                       Named("fit_aft") = fit_aft,
-                      Named("data_outcome") = data_outcome,
+                      Named("data_outcome") = data_outcome_r,
                       Named("fit_outcome") = fit_outcome,
                       Named("psihat") = psi0hat,
                       Named("psilower") = psi0lower,
@@ -867,80 +900,6 @@ List tsesimpcpp_mt(const DataFrame data,
     
     // obtain bootstrap confidence interval for HR
     const double loghr = std::log(hrhat);
-    //double sdloghr = -1, tcrit = -1;
-    
-    // BETA MODIFIED 3
-    //LogicalVector ok = 1 - fails;
-    
-
-    /* Beta modified 1
-    int n_ok = 0; 
-    double sum_loghr = 0.0, sumsq_log_hr = 0.0;
-
-    for(int z = 0; z < n_boot; z++){
-      if(!fails[z]){
-        double z1 = hrhats[z];
-        if(std::isfinite(z1) && z1 > 0.0){
-          double lh = std::log(z1);
-          sum_loghr += lh;
-          sumsq_log_hr += lh * lh;
-          n_ok++;
-        }
-      }
-    }
-
-    double sdloghr = -1, tcrit = -1;
-
-    if(n_ok >= 2){
-      double mean = sum_loghr / n_ok;
-      double var = (sumsq_log_hr - n_ok * mean * mean) / (n_ok -1);
-      sdloghr = std::sqrt(std::max(0.0,var));
-      tcrit = R::qt( 1- alpha /2, n_ok -1, 1, 0);
-
-      hrlower = std::exp(loghr - tcrit * sdloghr);
-      hrupper = std::exp(loghr + tcrit * sdloghr);
-      hr_CI_type = "bootstrap";
-    } else{
-      hrlower = hrhat;
-      hrupper = hrhat;
-      hr_CI_type = "bootstrap (n_ok) < 2";
-    }
-    */
-    /*
-    int n_ok = 0;
-    double mean = 0.0, M2 = 0.0;
-    for(int i = 0; i < n_boot; i++){
-      if(!fails[i]){
-        double h = hrhats[i];
-        if(std::isfinite(h) && h > 0.0){
-          double x = std::log(h);
-          n_ok++;
-          double delta = x - mean;
-          mean += delta/n_ok;
-          double delta2 = x - mean;
-          M2 += delta * delta2;
-        }
-      }
-    }
-    
-    //double loghr = std::log(hrhat);
-    double tstat;
-
-    if(n_ok >=2){
-      sdloghr = std::sqrt(M2/ (n_ok -1));
-      tcrit = R::qt(1.0 - alpha/ 2.0, n_ok - 1, 1 , 0);
-      hrlower = std::exp(loghr - tcrit * sdloghr);
-      hrupper = std::exp(loghr + tcrit * sdloghr);
-      hr_CI_type = "bootstrap";
-      tstat = (sdloghr > 0.0) ? (loghr / sdloghr) : 0.0;
-      pvalue = (sdloghr > 0.0)
-              ? 2.0 * (1.0 - R::pt(std::fabs(tstat), n_ok - 1, 1, 0))
-              : NA_REAL;
-    } else{
-      hrlower = hrhat;
-      hrupper = hrhat;
-      hr_CI_type = "bootstrap (n_ok < 2)";
-    } */
 
     // Build canonical ok: non-fail AND valid HR
     LogicalVector ok(n_boot);
@@ -984,20 +943,21 @@ List tsesimpcpp_mt(const DataFrame data,
       ? 2.0 * (1.0 - R::pt(std::fabs(tstat), count - 1, 1, 0))
       : NA_REAL;
 
-  } else {
-    hrlower = hrhat;
-    hrupper = hrhat;
-    hr_CI_type = "bootstrap (n_ok < 2)";
-  }
-  double min_h = std::numeric_limits<double>::infinity();
-  double max_h = -std::numeric_limits<double>::infinity();
-  for (int i = 0; i < n_boot; ++i) {
-    if (!ok[i]) continue;
-    min_h = std::min(min_h, hrhats[i]);
-    max_h = std::max(max_h, hrhats[i]);
-  }
-  dbg_min_hr = std::isfinite(min_h) ? min_h : NA_REAL;
-  dbg_max_hr = std::isfinite(max_h) ? max_h : NA_REAL;
+    } else {
+      hrlower = hrhat;
+      hrupper = hrhat;
+      hr_CI_type = "bootstrap (n_ok < 2)";
+    }
+
+    double min_h = std::numeric_limits<double>::infinity();
+    double max_h = -std::numeric_limits<double>::infinity();
+    for (int i = 0; i < n_boot; ++i) {
+      if (!ok[i]) continue;
+      min_h = std::min(min_h, hrhats[i]);
+      max_h = std::max(max_h, hrhats[i]);
+    }
+    dbg_min_hr = std::isfinite(min_h) ? min_h : NA_REAL;
+    dbg_max_hr = std::isfinite(max_h) ? max_h : NA_REAL;
 
     Rcpp::Rcout << "boot debug: n_boot" << n_boot << std::endl;
     Rcpp::Rcout << "n_ok =" << n_ok << std::endl; 
@@ -1007,48 +967,7 @@ List tsesimpcpp_mt(const DataFrame data,
     << " hrhat=" << hrhat
     << " hr_CI_type=" << hr_CI_type.get_cstring()
     << std::endl;
-  
-    /*TEST
-    NumericVector psihats1 = psihats[ok];
-    int m_ok = 0;
-    double m_mean = 0.0, m_M2 = 0.0;
-    for(int i = 0; i < n_boot; ++i){
-      if(!fails[i]){
-        double x = psihats[i];
-        if(std::isfinite(x)){
-          m_ok++;
 
-        }
-      }
-    }
-    */
-
-
-    /* ORIGINAL CODE
-    LogicalVector ok = !fails;
-    int n_ok = sum(ok);
-    NumericVector loghrs = log(hrhats[ok]);
-    double sdloghr = sd(loghrs);
-    double tcrit = R::qt(1-alpha/2, n_ok-1, 1, 0);
-    hrlower = exp(loghr - tcrit*sdloghr);
-    hrupper = exp(loghr + tcrit*sdloghr);
-    
-    
-    //loghr -> log(hrhat) -> from initial -1 building 
-    //tcrit 
-    //sdloghr
-    hr_CI_type = "bootstrap";
-    
-
-
-    pvalue = 2*(1 - R::pt(fabs(loghr/sdloghr), n_ok-1, 1, 0));
-    */
-    //Rprintf("[boot] n_ok=%d\n", n_ok);
-    //Rprintf("[boot] sdloghr=%.6f, tcrit=%.6f\n", sdloghr, tcrit);
-    //Rprintf("[boot] CI=(%.6f, %.6f)\n", hrlower, hrupper);
-    
-    // obtain bootstrap confidence interval for psi
-    //LogicalVector ok = !fails;
     NumericVector psihats1 = psihats[ok];
     double sdpsi = sd(psihats1);
     psilower = psihat - tcrit*sdpsi;

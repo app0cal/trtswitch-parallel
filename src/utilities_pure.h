@@ -16,10 +16,42 @@
 struct MatrixRM {
   //Row Major Matrix (R uses Column major but this works pretty well for our code)
   int rows=0, cols=0;
-  std::vector<double> a; // row-major: size rows*cols
-
+  std::vector<double> a;
+  int nrows() const { return rows; }
+  int ncols() const { return cols; }
   double& operator()(int r,int c)       { return a[(size_t)r*cols + c]; }
   double  operator()(int r,int c) const { return a[(size_t)r*cols + c]; }
+};
+
+std::vector<int>
+compose_block_rows(const std::vector<int>& row_idx,
+                   int start,                 // idx[h]
+                   const std::vector<int>& local_order); // order2 / order2x
+
+struct MatrixRMView {
+  int rows = 0, cols = 0;
+  const double* a = nullptr; // non-owning
+
+  int nrows() const { return rows; } // optional
+  int ncols() const { return cols; } // optional
+
+  double operator()(int r, int c) const {
+    return a[(size_t)r * cols + c];
+  }
+};
+
+// meant to be non owning version of row index view for matrix rm view
+// this will be changed to be w templates instead later
+struct RowIndexViewView {
+  const MatrixRMView* base = nullptr;
+  const std::vector<int>* idx = nullptr;
+
+  int rows() const { return (int)idx->size(); }
+  int cols() const { return base->cols; }
+
+  double operator()(int r, int c) const {
+    return (*base)((*idx)[r], c);
+  }
 };
 
 struct RowIndexView {
@@ -27,12 +59,13 @@ struct RowIndexView {
   const std::vector<int>* idx = nullptr;
 
   int rows() const { return (int)idx->size(); }
-  int cols() const { return base->cols; }
+  int cols() const { return base->ncols(); }
 
   double operator()(int r,int c) const {
     return (*base)((*idx)[r], c);
   }
 };
+
 
 template <class ZMat>
 struct RowRangeViewT {
@@ -163,8 +196,12 @@ double mean_cpp(
     const std::vector<double>& vec
 );
 
-double sum_cpp(
+double sumdouble_cpp(
     const std::vector<double>& vec
+);
+
+int sumint_cpp(
+    const std::vector<int>& vec
 );
 
 double sd_cpp(
@@ -219,11 +256,15 @@ int cholesky2_cpp(
     double toler
 );
 
+int cholesky2_cpp(MatrixRM& m, int n, double toler);
+
 void chsolve2_cpp(
     std::vector<std::vector<double>>& matrix, 
     int n, 
     std::vector<double>& y
 );
+
+void chsolve2_cpp(const MatrixRM& m, int n, std::vector<double>& y);
 
 void chinv2_cpp(
     std::vector<std::vector<double>>& matrix, 
@@ -234,4 +275,10 @@ std::vector<std::vector<double>> invsympd_cpp(
     std::vector<std::vector<double>>& matrix, 
     int n, 
     double toler
+);
+
+MatrixRM invsympd_cpp(
+  const MatrixRM& matrix, 
+  int n, 
+  double toler
 );

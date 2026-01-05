@@ -30,6 +30,18 @@ The main idea is to keep the pipeline of data processing similar to the original
 //vector length is unsigned integers so large vectors can cause issues with signed integers
 //also will probably rename xxxxx_cpp to xxxxx_ in the future, but I want to avoid re writing the same name for functions
 
+std::vector<int>
+compose_block_rows(const std::vector<int>& row_idx,
+                   int start,                 // idx[h]
+                   const std::vector<int>& local_order) // order2 / order2x
+{
+  std::vector<int> out(local_order.size());
+  for (size_t k = 0; k < local_order.size(); ++k) {
+    out[k] = row_idx[start + local_order[k]];
+  }
+  return out;
+}
+
 
 namespace details_pure {
   inline double NaN() { return std::numeric_limits<double>::quiet_NaN(); }
@@ -115,8 +127,17 @@ double mean_cpp(const std::vector<double>& vec) {
     return total / static_cast<double>(vec.size());
 }
 
-// sums the values in a vector
-double sum_cpp(const std::vector<double>& vec) {
+// sums the values in a double vector
+double sumdouble_cpp(const std::vector<double>& vec) {
+    double total = 0.0;
+    for (const auto& val : vec) {
+        total += val;
+    }
+    return total;
+}
+
+// sums the values in a int vector
+int sumint_cpp(const std::vector<int>& vec) {
     double total = 0.0;
     for (const auto& val : vec) {
         total += val;
@@ -402,6 +423,43 @@ int cholesky2_cpp(std::vector<std::vector<double>>& matrix, int n, double toler)
   return(rank*nonneg);
 }
 
+//overloaded version using MatrixRM
+int cholesky2_cpp(MatrixRM& m, int n, double toler) {
+  double temp;
+  int i, j, k;
+  double eps, pivot;
+  int rank;
+  int nonneg;
+
+  nonneg = 1;
+  eps = 0.0;
+  for (i = 0; i < n; i++) {
+    if (m(i,i) > eps) eps = m(i,i);
+  }
+  if (eps == 0.0) eps = toler;
+  else eps *= toler;
+
+  rank = 0;
+  for (i = 0; i < n; i++) {
+    pivot = m(i,i);
+    if (std::isinf(pivot) || pivot < eps) {
+      m(i,i) = 0.0;
+      if (pivot < -8*eps) nonneg = -1;
+    } else {
+      rank++;
+      for (j = i+1; j < n; j++) {
+        temp = m(i,j) / pivot;
+        m(i,j) = temp;
+        m(j,j) -= temp*temp*pivot;
+        for (k = j+1; k < n; k++) {
+          m(j,k) -= temp * m(i,k);
+        }
+      }
+    }
+  }
+
+  return rank * nonneg;
+}
 
 void chsolve2_cpp(std::vector<std::vector<double>>& matrix, int n, std::vector<double>& y) {
   int i, j;
@@ -425,6 +483,79 @@ void chsolve2_cpp(std::vector<std::vector<double>>& matrix, int n, std::vector<d
   }
 }
 
+// overloaded version with MatrixRM
+void chsolve2_cpp(const MatrixRM& m, int n, std::vector<double>& y) {
+  int i, j;
+  double temp;
+
+  // forward solve
+  for (i = 0; i < n; i++) {
+    temp = y[i];
+    for (j = 0; j < i; j++) {
+      temp -= y[j] * m(j,i);
+    }
+    y[i] = temp;
+  }
+
+  // backward solve
+  for (i = n-1; i >= 0; i--) {
+    if (m(i,i) == 0.0) y[i] = 0.0;
+    else {
+      temp = y[i] / m(i,i);
+      for (j = i+1; j < n; j++) {
+        temp -= y[j] * m(i,j);
+      }
+      y[i] = temp;
+    }
+  }
+}
+
+std::vector<std::vector<double>> invsympd_cpp(std::vector<std::vector<double>>& matrix, int n, double toler) {
+  int i, j;
+  std::vector<std::vector<double>> v = matrix;
+  i = cholesky2_cpp(v, n, toler);
+  chinv2_cpp(v, n);
+  for (i=1; i<n; i++) {
+    for (j=0; j<i; j++) {
+      v[j][i] = v[i][j];
+    }
+  }
+
+  return v;
+}
+
+// overloaded version 
+MatrixRM invsympd_cpp(const MatrixRM& matrix, int n, double toler) {
+  MatrixRM v = matrix;              // copy
+  (void)cholesky2_cpp(v, n, toler); // factorize in-place
+
+  MatrixRM inv;
+  inv.rows = n;
+  inv.cols = n;
+  inv.a.assign((size_t)n*(size_t)n, 0.0);
+
+  std::vector<double> col(n);
+
+  for (int c = 0; c < n; ++c) {
+    std::fill(col.begin(), col.end(), 0.0);
+    col[c] = 1.0;
+
+    chsolve2_cpp(v, n, col);        // solves A x = e_c using factorization
+
+    for (int r = 0; r < n; ++r) {
+      inv(r,c) = col[r];
+    }
+  }
+
+  // force symmetry (like your old code)
+  for (int i = 1; i < n; ++i) {
+    for (int j = 0; j < i; ++j) {
+      inv(j,i) = inv(i,j);
+    }
+  }
+
+  return inv;
+}
 
 void chinv2_cpp(std::vector<std::vector<double>>& matrix, int n) {
   double temp;
@@ -455,19 +586,4 @@ void chinv2_cpp(std::vector<std::vector<double>>& matrix, int n) {
       }
     }
   }
-}
-
-
-std::vector<std::vector<double>> invsympd_cpp(std::vector<std::vector<double>>& matrix, int n, double toler) {
-  int i, j;
-  std::vector<std::vector<double>> v = matrix;
-  i = cholesky2_cpp(v, n, toler);
-  chinv2_cpp(v, n);
-  for (i=1; i<n; i++) {
-    for (j=0; j<i; j++) {
-      v[j][i] = v[i][j];
-    }
-  }
-
-  return v;
 }

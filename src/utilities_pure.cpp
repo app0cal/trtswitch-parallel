@@ -42,9 +42,10 @@ compose_block_rows(const std::vector<int>& row_idx,
   return out;
 }
 
-
+inline double NaN() { return std::numeric_limits<double>::quiet_NaN(); }
+// details to help out with the R math calls (needed replacing bc it caused issues in mt)
 namespace details_pure {
-  inline double NaN() { return std::numeric_limits<double>::quiet_NaN(); }
+  //inline double NaN() { return std::numeric_limits<double>::quiet_NaN(); }
   inline bool is_nan(double x) { return std::isnan(x); }
   inline bool is_finite(double x) { return std::isfinite(x); }
 
@@ -92,7 +93,7 @@ namespace details_pure {
 } // namespace details_pure
 using namespace details_pure;
 
-
+// creates a vector that sequentially adds from int start to end
 std::vector<int> seq_cpp(int start, int end) {
   if(end < start) return {};
   int len = end - start + 1;
@@ -385,7 +386,7 @@ double qchisq_cpp(double p, double df, bool lower_tail, bool log_p){
 }
 
 
-//bottom three are copies of the copies of the survival package from utilties.cpp but made to work with std::vectors
+// bottom three are copies of the copies of the survival package from utilties.cpp but made to work with std::vectors
 // The following three utilities functions are from the survival package
 int cholesky2_cpp(std::vector<std::vector<double>>& matrix, int n, double toler) {
   double temp;

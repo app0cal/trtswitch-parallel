@@ -14,7 +14,7 @@
 //all functions here are just the signatures so no code is needed
 
 struct MatrixRM {
-  //Row Major Matrix (R uses Column major but this works pretty well for our code)
+  //Row Major Matrix (R uses Column major but Row Major works pretty well for our code)
   int rows=0, cols=0;
   std::vector<double> a;
   int nrows() const { return rows; }

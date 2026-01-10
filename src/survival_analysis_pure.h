@@ -3,6 +3,8 @@
 #include "utilities_pure.h"
 
 // tsesimp structs to be used
+
+// results from each bootstrap function call
 struct RepResult {
   double psi0hat = NA_REAL, psi0lower = NA_REAL, psi0upper = NA_REAL;
   double psi1hat = NA_REAL, psi1lower = NA_REAL, psi1upper = NA_REAL;
@@ -11,6 +13,8 @@ struct RepResult {
   int fail = 0;
 };
 
+// inputs into lambda f() turned into -> multi-thread function :) 
+// bootstrap function call inputs
 struct BaseInputs {
   int n = 0;
   int p = 0;     // baseline cov count for Cox
@@ -35,16 +39,20 @@ struct BaseInputs {
   MatrixRM zb_aft;    // n x (q+p2) or whatever you currently use
 };
 
-//structs to tightly connect every process in this function, to extend this or enable other features simply edit these or 
-//what we get sent from out test dummy of tsesimp_test.cpp
+// lifereg structs
+ 
+// input for lifereg_purecpp
 struct trial_data {
-  std::vector<double>              pps; // time
+  std::vector<double>              pps; // time/nickname for time
   std::vector<int>                 event; // event :P
   std::vector<int>                 swtrt; // switch treatment
   std::vector<std::string>         aft_names; // covariates for the outcome model
-  std::vector<std::vector<double>> aft;  // columns matching aft names
+  const MatrixRM* aft;  // columns matching aft names
+  const std::vector<int>* order_pp; 
 
   //bottom below are optional for survival analysis parts
+  std::vector<std::string>        rep; // never passed
+  std::vector<double>             stratum; // never passed
   std::vector<double>             time2; // time variable
   std::vector<double>             weight; // weights for the Cox model
   std::vector<double>             offset; // covariates for the Cox model
@@ -52,16 +60,20 @@ struct trial_data {
 };
 
 /*
+// Note: Planning to replace this because this does way more work than needed when we can use pointers for a flat array and pass a view or just & 
 Holds exactly what bygroup(...) returned in Rcpp:
 //  - index[i] = group ID (1…G) for row i
 //  - lookup[g] = vector of all row-indices i where index[i]==g
-
 */
 struct group_index {
   std::vector<int> index;
   std::vector<std::vector<int>> lookup;
 };
 
+
+// phreg structs
+
+// input for phreg_purecpp
 struct aftparams_pure {
   std::string dist;
   std::vector<int> strata;
@@ -123,7 +135,7 @@ struct coxparams_purecpp {
   // The row traversal order used by the math routines (e.g., order1/order1x)
   const std::vector<int>* order = nullptr;
 
-  int method = 0; // ties: 0=breslow, 1=efron (your code)
+  int method = 0; // ties: 0=breslow, 1=efron 
 };
 
 struct PhregFit {
@@ -148,36 +160,23 @@ struct coxfitout {
   std::vector<double> sebeta;   // size p
   std::vector<double> p;        // size p (optional)
 };
-/*Function Signatures:
 
-Notes:
-A lot of these functions are easy to write in for loops but just to make code more readable and maintainable, these functions are introduced.
-
-*/
-
-
-//this function is kind of not used so i might remove when finalizing
-/*
-template<typename STL, typename RCPPTYPE>
-STL to_std(
-  const RCPPTYPE& rvec
-);
-*/
+// list of functions headings below
 
 group_index group_by(
   const std::vector<std::string>& factor
 );
 
-double f_llik_2(int p, std::vector<double> par, void *ex);
+double f_llik_2_cpp(int p, const std::vector<double>& par, const void *ex);
 
-bool has_col_aft(const trial_data& d, const std::string& col_name);
+//bool has_col_aft(const trial_data& d, const std::string& col_name);
 
-void safety_check_col_aft(const trial_data& d);
+//void safety_check_col_aft(const trial_data& d);
 
-bool has_variable(
-  const trial_data& d, 
-  const std::string& var_name
-);
+//bool has_variable(
+//  const trial_data& d, 
+//  const std::string& var_name
+//);
 
 std::vector<double> f_score_1_cpp(
   int p, 
@@ -230,16 +229,8 @@ double liferegplloop_cpp(
 
 List lifereg_purecpp(
   //const DataFrame data expects trial_data with ...
-  const trial_data data,
-  const std::vector<std::string>& rep,
-  const std::vector<std::string>& stratum,
-  const std::string time,
-  const std::string time2,
-  const std::string event,
+  const trial_data& data,
   const std::vector<std::string>& covariates,
-  const std::string weight,
-  const std::string offset,
-  const std::string id,
   const std::string dist,
   const std::vector<double>& init,
   const bool robust,

@@ -816,6 +816,14 @@ List tsesimpcpp(const DataFrame data,
     double sdpsi1 = sd(psi1hats1);
     psi1lower = psi1hat - tcrit*sdpsi1;
     psi1upper = psi1hat + tcrit*sdpsi1;
+    Rcpp::Rcout << "boot original debug: n_boot" << n_boot << std::endl;
+    Rcpp::Rcout << "n_ok =" << n_ok << std::endl; 
+    Rcpp::Rcout << "sum_fails=" << std::accumulate(fails.begin(),fails.end(),0)
+    << " sdloghr=" << sdloghr
+    << " tcrit=" << tcrit
+    << " hrhat=" << hrhat
+    << " hr_CI_type=" << hr_CI_type.get_cstring()
+    << std::endl;
   }
   
   List settings = List::create(

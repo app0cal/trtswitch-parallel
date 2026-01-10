@@ -2,26 +2,13 @@
 #include <R_ext/Applic.h>
 //#include "utilities.h"
 //#include "survival_analysis.h"
-
 using namespace Rcpp;
-
-//#if defined(_OPENMP)
-//# include <omp.h>
-//#endif
 
 //custom includes (basically just utilities and survival analysis in pure cpp)
 #include "survival_analysis_pure.h"
 #include "utilities_pure.h"
 //using namespace Rcpp;
 
-// helper functions for converting Rcpp types to std::vector
-// a few are also just rewritten rcpp functions to use std::vector or stl structs instead
-/*
-template<typename STL, typename RCPPTYPE>
-STL to_std(const RCPPTYPE& rvec) {
-  return Rcpp::as<STL>(rvec);
-}
-*/
 
 // -----------------------------------------------------------------------------
 // Pure-C++ equivalent of Rcpp::bygroup(data, factor):
@@ -76,7 +63,7 @@ bool has_variable(const trial_data& d, const std::string& var_name) {
   return false;
 }
 */
-
+/*
 inline const std::vector<double>& get_numeric_column(const trial_data& d, const std::string& col_name) {
   if(col_name == "pps"){
     return d.pps;
@@ -90,6 +77,7 @@ inline const std::vector<double>& get_numeric_column(const trial_data& d, const 
 
   throw std::runtime_error("Variable not found: " + col_name);
 }
+*/
 
 int find_aft_index(const trial_data& d, const std::string& col_name) {
   for (size_t i = 0; i < d.aft_names.size(); ++i) {
@@ -122,6 +110,7 @@ NumericMatrix to_matrix(const std::vector<std::vector<double>>& matrix) {
   return out;
 } 
 
+/*
 bool has_col_aft(const trial_data& d, const std::string& col_name) {
   if (col_name == "pps")     return !d.pps.empty();
   if (col_name == "event")    return !d.event.empty() && d.event.size() == d.pps.size();
@@ -148,7 +137,7 @@ void safety_check_col_aft(const trial_data& d) {
     }
   }
 }
-
+*/
 
  
 
@@ -1575,20 +1564,12 @@ double liferegplloop_cpp(int p, std::vector<double> par, void *ex,
 // [[Rcpp::export]]
 List lifereg_purecpp(
     //const DataFrame data expects trial_data with 
-    const trial_data data,
-    const std::vector<std::string>& rep = {},
-    const std::vector<std::string>& stratum = {},
-    const std::string time = "time",
-    const std::string time2 = "",
-    const std::string event = "event",
+    const trial_data& data,
     const std::vector<std::string>& covariates = {},
-    const std::string weight = "",
-    const std::string offset = "",
-    const std::string id = "",
     const std::string dist = "weibull",
     const std::vector<double>& init = {},
-    const bool robust = 0,
-    const bool plci = 0,
+    const bool robust = false,
+    const bool plci = false,
     const double alpha = 0.05,
     const int maxiter = 50,
     const double eps = 1.0e-9) {
@@ -1604,7 +1585,7 @@ List lifereg_purecpp(
   
   */
 
-  //Rcpp::Rcout << "[lifereg_purecpp] line 1662" << std::endl;
+  //Rcpp::Rcout << "[lifereg_purecpp] line 1588, start of lifereg" << std::endl;
 
   int h, i, j, k, n = data.pps.size(); //.nrows();
   //covarities is covarities_aft from the capture list!
@@ -1754,22 +1735,32 @@ List lifereg_purecpp(
   (would not recommend turning every single into types of MatrixRMs)
   */
   MatrixRM zn{n, nvar, std::vector<double>((size_t)n*nvar,0.0)};
+  const MatrixRM& A = *data.aft;
+  const std::vector<int>& rp = *data.order_pp;
+
   for (int i=0; i<n; i++) {
     zn(i,0) = 1; // intercept
   }
-  std::vector<int> row_idx(n);
-  for (int i = 0; i < n; ++i) row_idx[i] = i;
-
-  for (j=0; j < nvar - 1; j++) {
-    std::string zj = covariates[j];
-    if (!has_col_aft(data, zj)) {
-      throw std::runtime_error("data must contain the variables in covariates");
-    }
-    const std::vector<double>& u = get_numeric_column(data,zj);
-    for (i=0; i<n; i++) {
-      zn(i,j+1) = u[i];
+  if (nvar > 1) {
+    for (int i = 0; i < n; ++i) {
+      zn(i, 1) = static_cast<double>(data.swtrt[i]);
     }
   }
+  if(static_cast<int>(rp.size())!= n){
+    throw std::runtime_error("order_pp size mistmatched");
+    //error handle
+  }
+
+  for (int col = 0; col < A.ncols(); ++col) {
+    for (int i = 0; i < n; ++i) {
+        zn(i, 2 + col) = A(rp[i], col);
+      }
+  }
+
+  std::vector<int> row_idx(n);
+  std::iota(row_idx.begin(),row_idx.end(),0);
+
+
   //Rcpp::Rcout << "[lifereg_purecpp] line 1843, after zn matrix construction" << std::endl;
 
   std::vector<double> weightn(n, 1.0);
@@ -1788,7 +1779,7 @@ List lifereg_purecpp(
   }
 
   std::vector<int> idn(n);
-  if (data.id_raw.empty() || id == "") {
+  if (data.id_raw.empty()) {
     idn = seq_cpp(1,n);
   } else {
     //NOTE: the data.id_raw is redundant check but we keep it for consistency 
@@ -1911,9 +1902,11 @@ List lifereg_purecpp(
   std::vector<double> lb0(nreps*p,NAN), ub0(nreps*p,NAN), prob0(nreps*p,NAN);
   std::vector<std::string> clparm0(nreps*p,"");
   
+  // Rcpp::Rcout << "[lifereg_purecpp] line 1905, before h loop" << std::endl;
   for (h=0; h<nreps; h++) {
     bool fail = false;
     liferegloopresult out;
+    aftparams_pure param;
 
     std::vector<int> q1 = seq_cpp(idx[h], idx[h+1]-1);
     int n1 = static_cast<int>(q1.size());
@@ -1928,7 +1921,12 @@ List lifereg_purecpp(
     //std::vector<std::vector<double>> z1 = subset_matrix_by_row_cpp(zn, q1);
     int start = idx[h];
     int len   = idx[h+1] - idx[h];
-    RowRangeViewT<RowIndexView> z1{ &zn_view, start, len };
+    std::vector<int> rows1;
+    rows1.reserve(len);
+    for (int t = start; t < start + len; ++t) {
+      rows1.push_back(row_idx[t]);  // row_idx already accounts for earlier reorder/subset
+    }
+    //RowRangeViewT<RowIndexView> z1{ &zn_view, start, len };
 
     // unify right censored data with interval censored data
     std::vector<double> tstart(n1), tstop(n1);
@@ -1983,17 +1981,21 @@ List lifereg_purecpp(
       offset1 = subset_by_idx(offset1, q2);
       id1 = subset_by_idx(id1, q2);
       //z1 = subset_matrix_by_row_cpp(z1,q2);
-      std::vector<int> rep_rows;              // original zn rows for the rep block
-      rep_rows.reserve(len);
-      for (int t = start; t < start + len; ++t) rep_rows.push_back(row_idx[t]);
+      rows1 = subset_by_idx(rows1, q2);
+      param.nrows = rows1.size();
+      //std::vector<int> rep_rows;              // original zn rows for the rep block
+      //rep_rows.reserve(len);
+      //for (int t = start; t < start + len; ++t) rep_rows.push_back(row_idx[t]);
 
       // now filter within the rep block:
-      std::vector<int> rep_rows2;
-      rep_rows2.reserve(q2.size());
-      for (int k : q2) rep_rows2.push_back(rep_rows[k]);
+      //std::vector<int> rep_rows2;
+      //rep_rows2.reserve(q2.size());
+      //for (int k : q2) rep_rows2.push_back(rep_rows[k]);
 
       //RowIndexView z1{ &zn, &rep_rows2 };
     }
+    //RowIndexView z1 {&A, &rows1};
+    RowIndexView z1 {&zn, &rows1}; // z_design(i,j) -> zn(rows1[i], j)
 
     // intercept only model
     std::vector<double> time0(n2);
@@ -2044,13 +2046,8 @@ List lifereg_purecpp(
     //int len   = idx[h+1] - idx[h];
 
     // Build mapping from local rep row i -> original zn row
-    std::vector<int> rows1;
-    rows1.reserve(len);
-    for (int t = start; t < start + len; ++t) {
-      rows1.push_back(row_idx[t]);   // row_idx maps filtered/sorted row -> original zn row
-    }
 
-    aftparams_pure param;
+    
     param.dist   = dist1;
     param.strata = std::move(stratum1);
     param.tstart = std::move(tstart);
@@ -2062,7 +2059,7 @@ List lifereg_purecpp(
 
     param.zbase = &zn;
     param.rows  = &rows1;
-    param.nrows = len;      // or n2 after q2 filtering
+    param.nrows = static_cast<int>(rows1.size());      // or n2 after q2 filtering
     param.ncols = nvar;     // p? careful: nvar for covariates, p for full parameter length; z cols should be nvar
 
     liferegloopresult outint = liferegloop_cpp(p, bint0, &param, maxiter, eps,
@@ -2092,9 +2089,10 @@ List lifereg_purecpp(
 
       fail = out.fail; 
       if(fail){ 
+        //bc we do std::move we can just instead reference param.reference incase we create "use after move issues"
         std::vector<double> y1; // = y0 - offset;
         for(size_t i = 0; i < y0.size(); i++){
-          y1.push_back(y0[i] - offset1[i]);
+          y1.push_back(y0[i] - param.offset[i]);
         }
         std::vector<std::vector<double>> v1(nvar, std::vector<double>(nvar));
         std::vector<double> u1(nvar);
@@ -2102,9 +2100,9 @@ List lifereg_purecpp(
         for(int i = 0; i < n2; i++){
           for(int j = 0; j < nvar; j++){
             for(int k = 0; k < nvar; k++){
-              v1[j][k] += weight1[i] * (z1(i,j) * z1(i,k));
+              v1[j][k] += param.weight[i] * (z1(i,j) * z1(i,k));
             }
-            u1[j] += weight1[i] * z1(i,j) * y1[i];
+            u1[j] += param.weight[i] * z1(i,j) * y1[i];
           }
         }
 
@@ -2130,9 +2128,9 @@ List lifereg_purecpp(
               pred += z1(i, j) * u1[j];
             }
             double r = y1[i] - pred;
-            s += weight1[i] * r * r;
+            s += param.weight[i] * r * r;
           }
-          s = 0.5* std::log(s/sumdouble_cpp(weight1)*n2/(n2-nvar));
+          s = 0.5* std::log(s/sumdouble_cpp(param.weight)*n2/(n2-nvar));
 
           for(j = nvar; j < p; j++){
             binit[j] = s;
@@ -2205,7 +2203,7 @@ List lifereg_purecpp(
         std::vector<std::vector<double>> ressco = f_ressco_1_cpp(p, b, &param);
 
         int nr; // number of rows in the score residual matrix
-        if (data.id_raw.empty() || id == "") {
+        if (data.id_raw.empty()) {
           for (i=0; i<n2; i++) {
             for (j=0; j<p; j++) {
               ressco[i][j] = weight1[i]*ressco[i][j];
@@ -2339,7 +2337,7 @@ List lifereg_purecpp(
       loglik1[h] = out.loglik;
     }
   }
-  //Rcpp::Rcout << "\t[lifereg_purecpp] line 2383, after parallel for loop" << std::endl;
+  //Rcpp::Rcout << "\t[lifereg_purecpp] line 2340, after h for loop" << std::endl;
 
   //end of parllel for loop so AFTER this line rcpp  
   // convert the vectors to Rcpp types
@@ -3629,12 +3627,12 @@ List phreg_purecpp(
             lb[k] = b[k] - zcrit*seb[k];
             ub[k] = b[k] + zcrit*seb[k];
             double z = b[k]/seb[k];
-            prob[k] = pchisq_cpp(z*z, 1.0, false, false);//R::pchisq(pow(b[k]/seb[k], 2), 1, 0, 0);
+            prob[k] = pchisq_cpp(z*z, 1.0, false, false); //R::pchisq(pow(b[k]/seb[k], 2), 1, 0, 0);
           } else {
             lb[k] = b[k] - zcrit*rseb[k];
             ub[k] = b[k] + zcrit*rseb[k];
             double z = b[k]/rseb[k];
-            prob[k] = pchisq_cpp(z*z, 1.0, false, false);//R::pchisq(pow(b[k]/rseb[k], 2), 1, 0, 0);
+            prob[k] = pchisq_cpp(z*z, 1.0, false, false); //R::pchisq(pow(b[k]/rseb[k], 2), 1, 0, 0);
           }
           clparm[k] = "Wald";
         }
@@ -3728,6 +3726,8 @@ List phreg_purecpp(
     if (p > 0) dgradhaz = subset_matrix_by_row(dgradhaz, sub);
   }
   #endif
+  // returns results after this, previously had code to turn vectors/matrixes back into R objects but not needed anymore
+  
   //Rcpp::Rcout << "line 3733, [phreg_purecpp] right before the conversion back into R objects" << std::endl;
   NumericVector sebeta0_r = wrap(sebeta0);
   NumericVector beta0_r = wrap(beta0);

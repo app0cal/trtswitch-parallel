@@ -42,6 +42,22 @@ compose_block_rows(const std::vector<int>& row_idx,
   return out;
 }
 
+// expensive way to permute a matrix based off a order vector, but used for correctness
+MatrixRM permute_rows(const MatrixRM& M, const std::vector<int>& order) {
+  const int n = (int)order.size();
+  if (n != M.nrows()) throw std::runtime_error("permute_rows: order.size != nrows");
+  MatrixRM out(n, M.ncols());
+
+  for (int i = 0; i < n; ++i) {
+    const int src = order[i];
+    if (src < 0 || src >= M.nrows()) throw std::runtime_error("permute_rows: src out of bounds");
+    for (int j = 0; j < M.ncols(); ++j) {
+      out(i, j) = M(src, j);
+    }
+  }
+  return out;
+}
+
 inline double NaN() { return std::numeric_limits<double>::quiet_NaN(); }
 // details to help out with the R math calls (needed replacing bc it caused issues in mt)
 namespace details_pure {
@@ -530,10 +546,10 @@ MatrixRM invsympd_cpp(const MatrixRM& matrix, int n, double toler) {
   MatrixRM v = matrix;              // copy
   (void)cholesky2_cpp(v, n, toler); // factorize in-place
 
-  MatrixRM inv;
-  inv.rows = n;
-  inv.cols = n;
-  inv.a.assign((size_t)n*(size_t)n, 0.0);
+  MatrixRM inv (n,n);
+  //inv.rows = n;
+  //inv.cols = n;
+  //inv.a.assign((size_t)n*(size_t)n, 0.0);
 
   std::vector<double> col(n);
 

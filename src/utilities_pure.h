@@ -21,7 +21,34 @@ struct MatrixRM {
   int ncols() const { return cols; }
   double& operator()(int r,int c)       { return a[(size_t)r*cols + c]; }
   double  operator()(int r,int c) const { return a[(size_t)r*cols + c]; }
+
+  MatrixRM() = default;
+
+  MatrixRM(int r, int c){
+    if(r < 0|| c < 0){
+      throw std::invalid_argument("Matrix creatoin failed, invalid dimensions.");
+    }
+    const size_t rr = (size_t)r;
+    const size_t cc = (size_t)c;
+    rows = r;
+    cols = c;
+    a.assign(rr*cc,0.0); //allocates to 0
+  }
+
+  MatrixRM(int r, int c, double init_value){
+    if(r < 0|| c < 0){
+      throw std::invalid_argument("Matrix creatoin failed, invalid dimensions.");
+    }
+    const size_t rr = (size_t)r;
+    const size_t cc = (size_t)c;
+    rows = r;
+    cols = c;
+    a.assign(rr*cc,init_value); //allocates to whatever value is passed
+  }
 };
+
+// expensive way to permute a matrix based off a order vector, but used for correctness
+MatrixRM permute_rows(const MatrixRM& M, const std::vector<int>& order);
 
 std::vector<int>
 compose_block_rows(const std::vector<int>& row_idx,

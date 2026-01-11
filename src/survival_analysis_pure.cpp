@@ -1188,7 +1188,7 @@ liferegloopresult liferegloop_cpp(int p, std::vector<double> par, void *ex,
   // standardize the design matrix
   std::vector<double> mu(nvar, 0.0), sigma(nvar, 1.0);
   //std::vector<std::vector<double>> z2(nsub, std::vector<double>(nvar, 0.0));
-  MatrixRM z2{ nsub, nvar, std::vector<double>((size_t)nsub * nvar, 0.0) };
+  MatrixRM z2 (nsub,nvar); //{ nsub, nvar, std::vector<double>((size_t)nsub * nvar, 0.0) };
 
   for (i=0; i<nvar; i++) {
     std::vector<double> u(nsub);
@@ -1734,7 +1734,7 @@ List lifereg_purecpp(
   - Turning the matrix from a 2D vector into a contigous array can help performance when multi-threading is enabled, 
   (would not recommend turning every single into types of MatrixRMs)
   */
-  MatrixRM zn{n, nvar, std::vector<double>((size_t)n*nvar,0.0)};
+  MatrixRM zn (n,nvar); //{n, nvar, std::vector<double>((size_t)n*nvar,0.0)};
   const MatrixRM& A = *data.aft;
   const std::vector<int>& rp = *data.order_pp;
 
@@ -2074,7 +2074,7 @@ List lifereg_purecpp(
       std::vector<int> colfit = seq_cpp(0,p-1);
 
       auto all_finite = [](const std::vector<double>& v){
-        return std::all_of(v.begin(),v.end(), [](double x){ return std::isfinite(x); });
+        return std::all_of(v.begin(),v.end(), [](double x){ return !std::isnan(x); });
       };
       bool have_init = (init.size() == static_cast<size_t> (p) && all_finite(init));
 
@@ -2605,7 +2605,7 @@ MatrixRM f_info_2_cpp(int p, const std::vector<double>& par, void *ex) {
 
   int i, j, k, person;
 
-  MatrixRM imat {p,p,std::vector<double>(p*p)};  // information matrix
+  MatrixRM imat (p,p);//{p,p,std::vector<double>(p*p)};  // information matrix
   double dtime;             // distinct time
   int ndead = 0;            // number of deaths at this time point
   double deadwt = 0;        // sum of weights for the deaths
@@ -2616,8 +2616,8 @@ MatrixRM f_info_2_cpp(int p, const std::vector<double>& par, void *ex) {
   std::vector<double> a(p);       // s1(beta,k,t)
   std::vector<double> a2(p);      // sum of w*exp(zbeta)*z for the deaths
   double xbar;              // zbar(beta,k,t)
-  MatrixRM cmat {p,p,std::vector<double>(p*p)};  // s2(beta,k,t)
-  MatrixRM cmat2 {p,p,std::vector<double>(p*p)}; // sum of w*exp(zbeta)*z*z' for the deaths
+  MatrixRM cmat (p,p); //{p,p,std::vector<double>(p*p)};  // s2(beta,k,t)
+  MatrixRM cmat2 (p,p); //{p,p,std::vector<double>(p*p)}; // sum of w*exp(zbeta)*z*z' for the deaths
 
   std::vector<double> eta(n);
   for (person = 0; person < n; person++) {
@@ -2837,9 +2837,9 @@ phregLoopOut phregloop_cpp(int p, const std::vector<double>& par, void *ex,
   std::vector<double> beta(p), newbeta(p);
   double loglik, newlk = 0;
   std::vector<double> u(p);
-  MatrixRM imat {p,p, std::vector<double>(p*p)};
+  MatrixRM imat (p,p); //{p,p, std::vector<double>(p*p)};
   std::vector<double> u1(ncolfit);
-  MatrixRM imat1 {ncolfit, ncolfit, std::vector<double>(ncolfit*ncolfit)};
+  MatrixRM imat1 (ncolfit,ncolfit); //{ncolfit, ncolfit, std::vector<double>(ncolfit*ncolfit)};
 
   // initial beta and log likelihood
   for (i=0; i<p; i++) {
@@ -2949,7 +2949,7 @@ phregLoopOut phregloop_cpp(int p, const std::vector<double>& par, void *ex,
   }
 
   MatrixRM var1 = invsympd_cpp(imat1, ncolfit, toler);
-  MatrixRM var{p,p, std::vector<double>(p*p)};
+  MatrixRM var (p,p); //{p,p, std::vector<double>(p*p)};
   for (i=0; i<ncolfit; i++) {
     for (j=0; j<ncolfit; j++) {
       var(colfit[i], colfit[j]) = var1(i,j);
@@ -3274,10 +3274,10 @@ List phreg_purecpp(
 
     //NumericMatrix z1(n1,p);
     //if (p > 0) z1 = subset_matrix_by_row(zn, q1);
-    MatrixRM z1;
-    z1.rows = n1;
-    z1.cols = p;
-    z1.a.assign((size_t)n1 * (size_t)p, 0.0);
+    MatrixRM z1 (n1,p);
+    //z1.rows = n1;
+    //z1.cols = p;
+    //z1.a.assign((size_t)n1 * (size_t)p, 0.0);
 
     if (p > 0) {
       for (int ii = 0; ii < n1; ++ii) {
@@ -3453,14 +3453,14 @@ List phreg_purecpp(
     #endif 
 
     std::vector<double> b(p);
-    MatrixRM vb {p,p,std::vector<double>(p*p)};
+    MatrixRM vb (p,p); //{p,p,std::vector<double>(p*p)};
     if (p > 0) {
       phregLoopOut out;
       std::vector<int> colfit = seq_cpp(0,p-1);
       auto init_ok = (init.size() == (size_t)p);
       if (init_ok) {
         for (double v : init) {
-          if (!std::isfinite(v)) { init_ok = false; break; }
+          if (!std::isnan(v)) { init_ok = false; break; }
         }
       }
       if (init_ok) {

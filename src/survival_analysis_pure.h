@@ -59,6 +59,26 @@ struct trial_data {
   std::vector<std::string>       id_raw; // numeric id variable
 };
 
+// output for liferegloop()
+struct liferegloopresult{
+  std::vector<double> coef;
+  int iter;
+  std::vector<std::vector<double>> var;
+  double loglik;
+  bool fail;
+};
+
+//output struct for lifereg_purecpp
+struct liferegOut{
+  bool fail;
+
+  // sum stat
+
+  // parest
+  std::vector<int> beta; //beta0
+  std::vector<int> sebeta; //rsebeta0
+};
+
 /*
 // Note: Planning to replace this because this does way more work than needed when we can use pointers for a flat array and pass a view or just & 
 Holds exactly what bygroup(...) returned in Rcpp:
@@ -94,14 +114,6 @@ struct aftparams_pure {
   }
   
   
-};
-
-struct liferegloopresult{
-  std::vector<double> coef;
-  int iter;
-  std::vector<std::vector<double>> var;
-  double loglik;
-  bool fail;
 };
 
 struct coxdata {

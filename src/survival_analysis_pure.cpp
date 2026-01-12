@@ -1585,8 +1585,6 @@ liferegOut lifereg_purecpp(
   
   */
 
-  //Rcpp::Rcout << "[lifereg_purecpp] line 1588, start of lifereg" << std::endl;
-
   int h, i, j, k, n = data.pps.size(); //.nrows();
   //covarities is covarities_aft from the capture list!
   int nvar = static_cast<int>(covariates.size()) + 1;
@@ -1616,39 +1614,6 @@ liferegOut lifereg_purecpp(
     throw std::runtime_error(errmsg);
   }
 
-  //rework this part with original logic
-  /*
-  //group_index out;
-  bool has_rep;
-  //IntegerVector repn(n);
-  std::vector<int> repn(n);
-  std::vector<std::vector<int>> u_rep;
-  int p_rep = static_cast<int>(rep.size());
-  if (p_rep == 1 && (rep[0] == "" || rep[0] == "none")) {
-    has_rep = 0;
-    std::fill(repn.begin(), repn.end(), 1);
-  } else {
-    group_index out = group_by(rep);
-    has_rep = 1;
-    //swaps the pointer to the index and lookup vectors
-    //std::move is used to avoid copying and is faster
-    repn = std::move(out.index);
-    u_rep = std::move(out.lookup);
-  }
-
-
-  std::vector<int> stratumn(n);
-  int p_stratum = static_cast<int>(stratum.size());
-  if (p_stratum == 1 && (stratum[0] == "" || stratum[0] == "none")) {
-    std::fill(stratumn.begin(), stratumn.end(), 1);
-  } else {
-    group_index out = group_by(stratum);
-    stratumn = std::move(out.index);
-  }
-  */
-  //initially we check if empty, but because of the higher level wrapper they are always called empty so just follow empty logic
-
-  //bool has_rep = 0;
   // TEMPORARILY INITIALIZED LIKE THIS BECAUSE TSESIMP NEVER CALLS THE ELSE FUNCTIONS!
   std::vector<int> repn(n, 1);
 
@@ -1760,9 +1725,6 @@ liferegOut lifereg_purecpp(
   std::vector<int> row_idx(n);
   std::iota(row_idx.begin(),row_idx.end(),0);
 
-
-  //Rcpp::Rcout << "[lifereg_purecpp] line 1843, after zn matrix construction" << std::endl;
-
   std::vector<double> weightn(n, 1.0);
   //higher level wrapper does not pass anything for weight so we skip this temporarily
   if (!data.weight.empty()) {
@@ -1873,6 +1835,7 @@ liferegOut lifereg_purecpp(
   n = (int)keep.size();
   if (n == 0) {
     // fail early (no data left)
+    
     Rcpp::stop("All observations filtered out due to missing values.");
   }
 
@@ -2331,34 +2294,17 @@ liferegOut lifereg_purecpp(
       }
 
       // log-likelihoods
-      //loglik0[h] = outint["loglik"];
       loglik0[h] = outint.loglik;
-      //loglik1[h] = out["loglik"];
       loglik1[h] = out.loglik;
     }
   }
-  //Rcpp::Rcout << "\t[lifereg_purecpp] line 2340, after h for loop" << std::endl;
-
-  //end of parllel for loop so AFTER this line rcpp  
-  // convert the vectors to Rcpp types
-  //NumericVector expbeta0 = exp(beta0);
-  //Rcpp::Rcout << "[liferegloop_cpp] beta0.size()=" << beta0.size() << std::endl;
+  
   std::vector<double> expbeta0(beta0.size());
   for (size_t i=0; i<beta0.size(); i++) {
-    //if (i < 5) Rcpp::Rcout << "beta0[" << i << "]=" << beta0[i] << std::endl;
     expbeta0[i] = std::exp(beta0[i]);
   }
 
-  //Rcpp::Rcout << "[liferegloop_cpp] line 2395, expbeta0 done" << std::endl;
-
-  //Rcpp::Rcout << "[liferegloop_cpp] line 2397, converting beta0, sebeta0, rsebeta0, z0 to NumericVector" << std::endl;
-  //NumericVector beta0_r = NumericVector(beta0.begin(), beta0.end());
-  //NumericVector sebeta0_r = NumericVector(sebeta0.begin(), sebeta0.end());
-  //NumericVector rsebeta0_r = NumericVector(rsebeta0.begin(), rsebeta0.end());
   std::vector<double> z0(nreps*p);
-  //Rcpp::Rcout << "[liferegloop_cpp] line 2402, beta0_r, sebeta0_r, rsebeta0_r done" << std::endl;
-  //if (!robust) z0 = beta0_r/sebeta0_r;
-  //else z0 = beta0_r/rsebeta0_r;
   for(int i = 0; i < nreps*p; i++){
     z0[i] = beta0[i]/sebeta0[i];
   }
@@ -2370,100 +2316,6 @@ liferegOut lifereg_purecpp(
   // add more stuff to return if needed/wanted
 
   return result;
-
-  /*
-  IntegerVector nobs_r = Rcpp::wrap(nobs);
-  IntegerVector nevents_r = Rcpp::wrap(nevents);
-  NumericVector loglik0_r = Rcpp::wrap(loglik0);
-  NumericVector loglik1_r = Rcpp::wrap(loglik1);
-  IntegerVector niter_r = Rcpp::wrap(niter);
-  //Rcpp::Rcout << "\t[liferegloop_cpp] line 2426, sumstat wrap done parest wrap start" << std::endl;
-
-  //for parest
-  //NumericMatrix vbeta0_r = Rcpp::wrap(vbeta0);
-  //Rcpp::Rcout << "[liferegloop_cpp] line 2462, vbeta0_r wrap done" << std::endl;
-  StringVector par0_r = Rcpp::wrap(par0);
-  NumericVector lb0_r = Rcpp::wrap(lb0);
-  NumericVector ub0_r = Rcpp::wrap(ub0);
-  NumericVector prob0_r = Rcpp::wrap(prob0);
-  StringVector clparm0_r = Rcpp::wrap(clparm0);
-  //NumericMatrix rvbeta0_r = Rcpp::wrap(rvbeta0);
-  LogicalVector fails_r = Rcpp::wrap(fails);
-
-  //special cases because wrap is weird with matrices
-  NumericMatrix vbeta0_r = to_matrix(vbeta0);
-  NumericMatrix rvbeta0_r = to_matrix(rvbeta0);
-
-  //Rcpp::Rcout << "\t[liferegloop_cpp] line 2468, wrapping end" << std::endl;
-  //end of conversion
-  DataFrame sumstat = List::create(
-    _["n"] = nobs_r,
-    _["nevents"] = nevents_r,
-    _["loglik0"] = loglik0_r,
-    _["loglik1"] = loglik1_r,
-    _["niter"] = niter_r,
-    _["dist"] = dist1,
-    _["p"] = p,
-    _["nvar"] = nvar-1,
-    _["robust"] = robust,
-    _["fail"] = fails_r);
-  DataFrame parest;
-  if (!robust) {
-    parest = DataFrame::create(
-      _["param"] = par0_r,
-      _["beta"] = beta0_r,
-      _["sebeta"] = sebeta0_r,
-      _["z"] = z0,
-      _["expbeta"] = expbeta0,
-      _["vbeta"] = vbeta0_r,
-      _["lower"] = lb0_r,
-      _["upper"] = ub0_r,
-      _["p"] = prob0_r,
-      _["method"] = clparm0_r);
-  } else {
-    parest = DataFrame::create(
-      _["param"] = par0_r,
-      _["beta"] = beta0_r,
-      _["sebeta"] = rsebeta0_r,
-      _["z"] = z0,
-      _["expbeta"] = expbeta0,
-      _["vbeta"] = rvbeta0_r,
-      _["lower"] = lb0_r,
-      _["upper"] = ub0_r,
-      _["p"] = prob0_r,
-      _["method"] = clparm0_r,
-      _["sebeta_naive"] = sebeta0_r,
-      _["vbeta_naive"] = vbeta0_r);
-  }
-
-  // reimplement this after checking numerical accuracy of output
-  if (has_rep) {
-    for (i=0; i<p_rep; i++) {
-      String s = rep[i];
-      if (TYPEOF(data[s]) == INTSXP) {
-        IntegerVector repwi = u_rep[s];
-        sumstat.push_back(repwi[rep01-1], s);
-        parest.push_back(repwi[rep0-1], s);
-      } else if (TYPEOF(data[s]) == REALSXP) {
-        NumericVector repwn = u_rep[s];
-        sumstat.push_back(repwn[rep01-1], s);
-        parest.push_back(repwn[rep0-1], s);
-      } else if (TYPEOF(data[rep]) == STRSXP) {
-        StringVector repwc = u_rep[s];
-        sumstat.push_back(repwc[rep01-1], s);
-        parest.push_back(repwc[rep0-1], s);
-      }
-    }
-  }
-  
-  //add functionality for this in another function that requires it but here it is not needed.
-
-  List result = List::create(
-    _["sumstat"] = sumstat,
-    _["parest"] = parest);
-
-  return result;
-  */
 }
 
 // bottom are phregcpp functions and helpers
@@ -3319,7 +3171,6 @@ coxfitout phreg_purecpp(
 
     int nstrata = static_cast<int>(istratum.size());
     istratum.push_back(n1);
-    //refactorizatoin needed below this
     // ignore subjects not at risk for any event time
     
     std::vector<int> ignore1z(n1);
@@ -3504,7 +3355,8 @@ coxfitout phreg_purecpp(
       fails[h] = out.fail; //["fail"];
       
       // robust variance estimates
-      NumericVector rseb(p);  // robust standard error for betahat
+      //NumericVector rseb(p);  // robust standard error for betahat
+      std::vector<double> rseb(p,0.0);
       #if TRT_PHREG_ENABLE_ROBUST
       if (robust) {
         NumericMatrix ressco = f_ressco_2(p, b, &param);

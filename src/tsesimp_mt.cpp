@@ -1194,15 +1194,15 @@ List tsesimpcpp_mt(const DataFrame data,
     //Rcpp::Rcout << "[tsesimp_mt] line 1130, before bootstrapping" << std::endl;
     if (seed != NA_INTEGER) set_seed(seed);
     
-    /*
+    
     std::vector<int> idb(n), stratumb(n), eventb(n), treatb(n);
     std::vector<int> pdb(n), swtrtb(n);
     std::vector<double> timeb(n), censor_timeb(n), pd_timeb(n), swtrt_timeb(n);
-    std::vector<std::vector<double>> zb(n,std::vector<double>(p)), zb_aft(n,std::vector<double>(q+p2));*/
+    //std::vector<std::vector<double>> zb(n,std::vector<double>(p)), zb_aft(n,std::vector<double>(q+p2));
 
-    IntegerVector idb(n), stratumb(n), eventb(n), treatb(n);
-    IntegerVector pdb(n), swtrtb(n);
-    NumericVector timeb(n), censor_timeb(n), pd_timeb(n), swtrt_timeb(n);
+    //IntegerVector idb(n), stratumb(n), eventb(n), treatb(n);
+    //IntegerVector pdb(n), swtrtb(n);
+    //NumericVector timeb(n), censor_timeb(n), pd_timeb(n), swtrt_timeb(n);
     MatrixRM zb (zn_cpp.nrows(),zn_cpp.ncols()), zb_aft (zncpp_aft.nrows(),zncpp_aft.ncols());
     std::vector<int> boot_row(n);
     std::iota(boot_row.begin(),boot_row.end(),0);
@@ -1236,7 +1236,12 @@ List tsesimpcpp_mt(const DataFrame data,
     //reorder(boot_row, ordercpp);
     //zn = subset_matrix_by_row(zn, order);
     //zn_aft = subset_matrix_by_row(zn_aft, order);
-    
+
+    sharedInputs input1 = {n,q,p,p2,
+      covariates,covariates_aft,cov_names_cox,
+      dist, recensor, swtrt_control_only,
+      alpha, zcrit, ties, offset};
+
     for (k=0; k<n_boot; k++) {
       
       // sample the data with replacement by treatment group
@@ -1269,17 +1274,34 @@ List tsesimpcpp_mt(const DataFrame data,
         //zb(i,_) = zn(j,_);
         //zb_aft(i,_) = zn_aft(j,_);
       }
-      
+
       std::vector<int> row_rep(n);
       std::iota(row_rep.begin(), row_rep.end(), 0);
       Rcpp::Rcout << "current boot index:" << k<< std::endl;
-      out = f(idb, stratumb, timeb, eventb, treatb, censor_timeb,
-              pdb, pd_timeb, swtrtb, swtrt_timeb, zb, zb_aft,row_rep);
       
-      fails[k] = out["fail"];
-      hrhats[k] = out["hrhat"];
-      psihats[k] = out["psihat"];
-      psi1hats[k] = out["psi1hat"];
+      replicateInputs input2 = {idb,stratumb, eventb, treatb, 
+        pdb, swtrtb, 
+        timeb, censor_timeb, pd_timeb, swtrt_timeb,
+        zb, zb_aft,row_rep};
+      
+      //std::vector<int> row_rep(n);
+      //std::iota(row_rep.begin(), row_rep.end(), 0);
+      //Rcpp::Rcout << "current boot index:" << k<< std::endl;
+      
+      RepResult output = run_replicate_cpp(k,input1,input2);
+
+      fails[k] = output.fail;
+      hrhats[k] = output.hrhat;
+      psihats[k] = output.psi0hat;
+      psi1hats[k] = output.psi1hat;
+
+      //out = f(idb, stratumb, timeb, eventb, treatb, censor_timeb,
+      //        pdb, pd_timeb, swtrtb, swtrt_timeb, zb, zb_aft,row_rep);
+      
+      //fails[k] = out["fail"];
+      //hrhats[k] = out["hrhat"];
+      //psihats[k] = out["psihat"];
+      //psi1hats[k] = out["psi1hat"];
     }
     //Rcpp::Rcout << "[tsesimp_mt] line 1211, after bootstrapping loop" << std::endl;
     

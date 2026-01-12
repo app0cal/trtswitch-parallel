@@ -10,6 +10,7 @@ using namespace Rcpp;
 //add custom includes
 #include "utilities_pure.h"
 #include "survival_analysis_pure.h"
+#include <omp.h>
 #include <R_ext/Print.h>
 
 
@@ -26,11 +27,11 @@ struct sharedInputs{
 };
 
 struct replicateInputs{ 
-  std::vector<int>& idb, stratumb, eventb, treatb;
-  std::vector<int>& pdb, swtrtb;
-  std::vector<double>& timeb, censor_timeb, pd_timeb, swtrt_timeb;
-  const MatrixRM& zn, zn_aft;
-  std::vector<int> row;
+  std::vector<int> &idb, &stratumb, &eventb, &treatb;
+  std::vector<int> &pdb, &swtrtb;
+  std::vector<double> &timeb, &censor_timeb, &pd_timeb, &swtrt_timeb;
+  const MatrixRM &zn, &zn_aft;
+  std::vector<int> &row;
 };
 
 // pure cpp version of lambda f() only computes core outputs
@@ -38,16 +39,17 @@ struct replicateInputs{
 RepResult run_replicate_cpp(  
   int k,  // current index 
   // const refs to base data + boot indices + config 
-  sharedInputs& shared,
+  const sharedInputs& shared,
   replicateInputs& in){
 
   // AFTER NUMERICAL PARITY CHECKS HERE REMOVE AUTO KEYWORDS, auto makes it much more work to debug so we can just swap back to regular types
   // shared alias
   auto& covariates_aft = shared.covariates_aft;
-  auto& n = shared.n, q = shared.q, p = shared.p, p2 = shared.p2;
-  auto& swtrt_control_only = shared.swtrt_control_only, recensor = shared.recensor;
+  auto& n = shared.n, & q = shared.q, &p = shared.p, &p2 = shared.p2;
+  auto& swtrt_control_only = shared.swtrt_control_only;
+  auto& recensor = shared.recensor;
   auto& offset = shared.offset;
-  auto& alpha = shared.alpha, zcrit = shared.zcrit;
+  auto& alpha = shared.alpha, &zcrit = shared.zcrit;
   std::string ties = shared.ties, dist = shared.dist;
   std::vector<std::string> cov_names_cox = shared.cov_names_cox;
 
@@ -91,14 +93,14 @@ RepResult run_replicate_cpp(
   // checks if row and order passed are identity (so no need to reorder)
   bool is_identity = true;
   for (int i = 0; i < n; ++i) {
-    if (row[i] != i && ordercpp[i] != i){ 
+    if (row[i] != i || ordercpp[i] != i){ 
       is_identity = false; 
       break; 
     }
   }
   // when called from the bootstrap check should auto sort but we have this as a backup just in case!
   if (!is_identity) {
-    Rcpp::Rcout << "identity fail" << std::endl;
+    //Rcpp::Rcout << "identity fail" << std::endl;
     // reorder vectors AND reorder matrices (see 3B)
     reorder(idb,ordercpp); //idb = idb[order];
     reorder(stratumb,ordercpp); //stratumb = stratumb[order];
@@ -303,6 +305,7 @@ List tsesimpcpp_mt(const DataFrame data,
                 const int seed = NA_INTEGER) {
   //Rcpp::Rcout << "[tsesimp] line 313 start!" << std::endl;
   Rcpp::RNGScope scope;
+  Rcpp::Rcout << "omp max threads: " << omp_get_max_threads() << "\n";
   int i, j, k, n = data.nrow();
   
   int p = static_cast<int>(base_cov.size());
@@ -1122,7 +1125,8 @@ List tsesimpcpp_mt(const DataFrame data,
   
   List out = f(idn, stratumn, timen, eventn, treatn, censor_timen,
                pdn, pd_timen, swtrtn, swtrt_timen, zn_cpp, zncpp_aft,rows);
-  //Rcpp::Rcout << "[tsesimp_mt] line 1059, after initial f() call" << std::endl;
+  Rcpp::Rcout << "[tsesimp_mt] line 1127, after initial f() call" << std::endl;
+
   List data_aft = out["data_aft"];
   List fit_aft = out["fit_aft"];
   DataFrame data_outcome = DataFrame(out["data_outcome"]);
@@ -1177,8 +1181,10 @@ List tsesimpcpp_mt(const DataFrame data,
   
   // construct the confidence interval for HR
   String hr_CI_type;
-  NumericVector hrhats(n_boot), psihats(n_boot), psi1hats(n_boot);
-  LogicalVector fails(n_boot);
+  //NumericVector hrhats(n_boot), psihats(n_boot), psi1hats(n_boot);
+  //LogicalVector fails(n_boot);
+  std::vector<double> hrhats(n_boot), psihats(n_boot), psi1hats(n_boot);
+  std::vector<bool> fails(n_boot);
 
   //debug variables 
   int dbg_n_ok = NA_INTEGER;
@@ -1195,15 +1201,15 @@ List tsesimpcpp_mt(const DataFrame data,
     if (seed != NA_INTEGER) set_seed(seed);
     
     
-    std::vector<int> idb(n), stratumb(n), eventb(n), treatb(n);
-    std::vector<int> pdb(n), swtrtb(n);
-    std::vector<double> timeb(n), censor_timeb(n), pd_timeb(n), swtrt_timeb(n);
+    //std::vector<int> idb(n), stratumb(n), eventb(n), treatb(n);
+    //std::vector<int> pdb(n), swtrtb(n);
+    //std::vector<double> timeb(n), censor_timeb(n), pd_timeb(n), swtrt_timeb(n);
     //std::vector<std::vector<double>> zb(n,std::vector<double>(p)), zb_aft(n,std::vector<double>(q+p2));
 
     //IntegerVector idb(n), stratumb(n), eventb(n), treatb(n);
     //IntegerVector pdb(n), swtrtb(n);
     //NumericVector timeb(n), censor_timeb(n), pd_timeb(n), swtrt_timeb(n);
-    MatrixRM zb (zn_cpp.nrows(),zn_cpp.ncols()), zb_aft (zncpp_aft.nrows(),zncpp_aft.ncols());
+    //MatrixRM zb (zn_cpp.nrows(),zn_cpp.ncols()), zb_aft (zncpp_aft.nrows(),zncpp_aft.ncols());
     std::vector<int> boot_row(n);
     std::iota(boot_row.begin(),boot_row.end(),0);
 
@@ -1236,33 +1242,74 @@ List tsesimpcpp_mt(const DataFrame data,
     //reorder(boot_row, ordercpp);
     //zn = subset_matrix_by_row(zn, order);
     //zn_aft = subset_matrix_by_row(zn_aft, order);
+    std::vector<int> idn_cpp(idn.begin(), idn.end());
+    std::vector<int> stratumn_cpp(stratumn.begin(), stratumn.end());
+    std::vector<double> timen_cpp(timen.begin(), timen.end());
+    std::vector<int> eventn_cpp(eventn.begin(),eventn.end());
+    std::vector<int> treatn_cpp(treatn.begin(),treatn.end());
+    std::vector<double> censor_timen_cpp(censor_timen.begin(),censor_timen.end());
+    std::vector<int> pdn_cpp(pdn.begin(),pdn.end());
+    std::vector<double> pd_timen_cpp(pd_timen.begin(),pd_timen.end());
+    std::vector<int> swtrtn_cpp(swtrtn.begin(),swtrtn.end());
+    std::vector<double> swtrt_timen_cpp(swtrt_timen.begin(),swtrt_timen.end());
 
     sharedInputs input1 = {n,q,p,p2,
       covariates,covariates_aft,cov_names_cox,
       dist, recensor, swtrt_control_only,
       alpha, zcrit, ties, offset};
 
-    for (k=0; k<n_boot; k++) {
-      
+    // moved computation of the RNG before worker thread
+    std::vector<std::vector<int>> boot_index(n_boot, std::vector<int>(n));
+    for (int k = 0; k < n_boot; ++k) {
+      for (int i = 0; i < n0; ++i) {
+        double u = R::runif(0.0, 1.0);
+        int j = static_cast<int>(std::floor(u * n0));
+        if (j == n0) j = n0 - 1; // paranoia clamp
+        boot_index[k][i] = j;
+      }
+      for (int i = n0; i < n; ++i) {
+        double u = R::runif(0.0, 1.0);
+        int j = n0 + static_cast<int>(std::floor(u * n1));
+        if (j == n) j = n - 1;
+        boot_index[k][i] = j;
+      }
+    }
+
+
+    Rcpp::Rcout << "[tsesimp_mt] line 1266, before main pragma loop" << std::endl;
+
+    #pragma omp parallel for schedule(static) default(none) \
+      shared(n_boot, n, p, q, p2, boot_index, \
+        idn_cpp, stratumn_cpp, timen_cpp, eventn_cpp, treatn_cpp, censor_timen_cpp, pdn_cpp, pd_timen_cpp, swtrtn_cpp, swtrt_timen_cpp, \
+        zn_sorted, zn_aft_sorted, fails, hrhats, psihats, psi1hats, input1) 
+    for (int k=0; k<n_boot; k++) {
+      //thread local buffers
+      std::vector<int> idb(n), stratumb(n), eventb(n), treatb(n);
+      std::vector<int> pdb(n), swtrtb(n);
+      std::vector<double> timeb(n), censor_timeb(n), pd_timeb(n), swtrt_timeb(n);
+      MatrixRM zb (n,p), zb_aft (n,q + p2);
       // sample the data with replacement by treatment group
-      for (i=0; i<n; i++) {
-        double u = R::runif(0,1);
-        if (i < n0) {
-          j = static_cast<int>(std::floor(u*n0));
-        } else {
-          j = n0 + static_cast<int>(std::floor(u*n1));
-        }
-        
-        idb[i] = idn[j];
-        stratumb[i] = stratumn[j];
-        timeb[i] = timen[j];
-        eventb[i] = eventn[j];
-        treatb[i] = treatn[j];
-        censor_timeb[i] = censor_timen[j];
-        pdb[i] = pdn[j];
-        pd_timeb[i] = pd_timen[j];
-        swtrtb[i] = swtrtn[j];
-        swtrt_timeb[i] = swtrt_timen[j];
+      for (int i=0; i<n; i++) {
+        // pre calculated now so we can remove this
+        //double u = R::runif(0,1);
+        //if (i < n0) {
+        //  j = static_cast<int>(std::floor(u*n0));
+        //} else {
+        //  j = n0 + static_cast<int>(std::floor(u*n1));
+        //}
+        int j = boot_index[k][i];
+
+        // check scopoe of j here 
+        idb[i] = idn_cpp[j];
+        stratumb[i] = stratumn_cpp[j];
+        timeb[i] = timen_cpp[j];
+        eventb[i] = eventn_cpp[j];
+        treatb[i] = treatn_cpp[j];
+        censor_timeb[i] = censor_timen_cpp[j];
+        pdb[i] = pdn_cpp[j];
+        pd_timeb[i] = pd_timen_cpp[j];
+        swtrtb[i] = swtrtn_cpp[j];
+        swtrt_timeb[i] = swtrt_timen_cpp[j];
 
         const int base_j = j;
         for(int col = 0; col < p; col++){
@@ -1277,7 +1324,7 @@ List tsesimpcpp_mt(const DataFrame data,
 
       std::vector<int> row_rep(n);
       std::iota(row_rep.begin(), row_rep.end(), 0);
-      Rcpp::Rcout << "current boot index:" << k<< std::endl;
+      //Rcpp::Rcout << "current boot index:" << k<< std::endl;
       
       replicateInputs input2 = {idb,stratumb, eventb, treatb, 
         pdb, swtrtb, 
@@ -1294,16 +1341,8 @@ List tsesimpcpp_mt(const DataFrame data,
       hrhats[k] = output.hrhat;
       psihats[k] = output.psi0hat;
       psi1hats[k] = output.psi1hat;
-
-      //out = f(idb, stratumb, timeb, eventb, treatb, censor_timeb,
-      //        pdb, pd_timeb, swtrtb, swtrt_timeb, zb, zb_aft,row_rep);
-      
-      //fails[k] = out["fail"];
-      //hrhats[k] = out["hrhat"];
-      //psihats[k] = out["psihat"];
-      //psi1hats[k] = out["psi1hat"];
     }
-    //Rcpp::Rcout << "[tsesimp_mt] line 1211, after bootstrapping loop" << std::endl;
+    Rcpp::Rcout << "[tsesimp_mt] line 1345, after bootstrapping loop" << std::endl;
     
     // obtain bootstrap confidence interval for HR
     //const double loghr = std::log(hrhat);
@@ -1359,9 +1398,8 @@ List tsesimpcpp_mt(const DataFrame data,
 
     double sdloghr = NA_REAL;
     double tcrit = NA_REAL;
- 
-    if (n_ok >= 2) {
     int count = 0;
+    if (n_ok >= 2) {
     double mean = 0.0, M2 = 0.0;
 
     for (int i = 0; i < n_boot; ++i) {
@@ -1416,13 +1454,24 @@ List tsesimpcpp_mt(const DataFrame data,
     << " hr_CI_type=" << hr_CI_type.get_cstring()
     << std::endl;
 
-    NumericVector psihats1 = psihats[ok];
+    Rcpp::NumericVector psihats1(count);
+    Rcpp::NumericVector psi1hats1(count);
+
+    int pos = 0;
+    for (int i = 0; i < n_boot; ++i) {
+      if (!ok[i]) continue;
+      psihats1[pos]  = psihats[i];    // std::vector<double>
+      psi1hats1[pos] = psi1hats[i];   // std::vector<double>
+      ++pos;
+    }
+
+    //NumericVector psihats1 = psihats[ok];
     double sdpsi = sd(psihats1);
     psilower = psihat - tcrit*sdpsi;
     psiupper = psihat + tcrit*sdpsi;
     psi_CI_type = "bootstrap";
     
-    NumericVector psi1hats1 = psi1hats[ok];
+    //NumericVector psi1hats1 = psi1hats[ok];
     double sdpsi1 = sd(psi1hats1);
     psi1lower = psi1hat - tcrit*sdpsi1;
     psi1upper = psi1hat + tcrit*sdpsi1;

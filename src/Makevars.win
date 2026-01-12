@@ -1,5 +1,5 @@
 CXX_STD = CXX17
 
-PKG_CPPFLAGS =
+PKG_CPPFLAGS += -fopenmp
 PKG_CXXFLAGS = -O0 -g -fno-omit-frame-pointer -D_GLIBCXX_DEBUG -Wall -pedantic -fdiagnostics-color=always
-PKG_LIBS =
+PKG_LIBS = -fopenmp	

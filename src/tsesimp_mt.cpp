@@ -12,7 +12,7 @@ using namespace Rcpp;
 #include "survival_analysis_pure.h"
 #include <R_ext/Print.h>
 
-/*
+
 struct sharedInputs{
   int n, q, p, p2; 
   std::vector<std::string> covariates;
@@ -30,7 +30,7 @@ struct replicateInputs{
   std::vector<int>& pdb, swtrtb;
   std::vector<double>& timeb, censor_timeb, pd_timeb, swtrt_timeb;
   const MatrixRM& zn, zn_aft;
-  std::vector<int> zb_row,zbaft_row;
+  std::vector<int> row;
 };
 
 // pure cpp version of lambda f() only computes core outputs
@@ -40,10 +40,17 @@ RepResult run_replicate_cpp(
   // const refs to base data + boot indices + config 
   sharedInputs& shared,
   replicateInputs& in){
+
+  // AFTER NUMERICAL PARITY CHECKS HERE REMOVE AUTO KEYWORDS, auto makes it much more work to debug so we can just swap back to regular types
   // shared alias
   auto& covariates_aft = shared.covariates_aft;
   auto& n = shared.n, q = shared.q, p = shared.p, p2 = shared.p2;
-  
+  auto& swtrt_control_only = shared.swtrt_control_only, recensor = shared.recensor;
+  auto& offset = shared.offset;
+  auto& alpha = shared.alpha, zcrit = shared.zcrit;
+  std::string ties = shared.ties, dist = shared.dist;
+  std::vector<std::string> cov_names_cox = shared.cov_names_cox;
+
   // replicate alias
   auto& idb = in.idb;
   auto& stratumb = in.stratumb;
@@ -57,137 +64,144 @@ RepResult run_replicate_cpp(
   auto& swtrt_timeb = in.swtrt_timeb;
   auto& zb = in.zn;
   auto& zb_aft = in.zn_aft;
+  auto& row = in.row;
   
   int h, i, j;
-  bool fail = 0; // whether any model fails to converge
-  std::vector<double>  init(1, std::numeric_limits<double>::quiet_NaN());
-  
+  bool fail = false; // whether any model fails to converge
+  //NumericVector init(1, NA_REAL);
+  std::vector<double> init_cpp(1,std::numeric_limits<double>::quiet_NaN()); 
+
+  //List fit1 = List::create(Named("junk") = "dog");
+  liferegOut fit1_cpp; // native cpp version
+  //DataFrame data1;
+  //List fit_outcome = List::create(Named("junk2") = "dog2");
+  coxfitout fit_outcome_cpp; // native cpp version
+
+  bool uselifepure = true;
+  bool usephregpure = true;
+
   // order data by treat
-  std::vector<int> order = seq_cpp(0, shared.n-1);
-  std::sort(order.begin(), order.end(), [&](int i, int j) {
+  //IntegerVector order = seq(0, n-1);
+  std::vector<int> ordercpp = seq_cpp(0,n-1);
+  std::sort(ordercpp.begin(), ordercpp.end(), [&](int i, int j) {
     return (treatb[i] < treatb[j]);
   });
-  
-  reorder(idb,order); //idb = idb[order];
-  reorder(stratumb,order); //stratumb = stratumb[order];
-  reorder(timeb, order); //timeb = timeb[order];
-  reorder(eventb, order); //eventb = eventb[order];
-  reorder(treatb, order); //treatb = treatb[order];
-  reorder(censor_timeb,order); //censor_timeb = censor_timeb[order];
-  reorder(pdb, order); //pdb = pdb[order];
-  reorder(pd_timeb, order); //pd_timeb = pd_timeb[order];
-  reorder(swtrtb, order); //swtrtb = swtrtb[order];
-  reorder(swtrt_timeb,order); //swtrt_timeb = swtrt_timeb[order];
-  zb = subset_matrix_by_row(zb, order);
-  zb_aft = subset_matrix_by_row(zb_aft, order);
-  
+  //std::vector<int> ordercpp = seq_cpp(0,n-1);
+
+  // checks if row and order passed are identity (so no need to reorder)
+  bool is_identity = true;
+  for (int i = 0; i < n; ++i) {
+    if (row[i] != i && ordercpp[i] != i){ 
+      is_identity = false; 
+      break; 
+    }
+  }
+  // when called from the bootstrap check should auto sort but we have this as a backup just in case!
+  if (!is_identity) {
+    Rcpp::Rcout << "identity fail" << std::endl;
+    // reorder vectors AND reorder matrices (see 3B)
+    reorder(idb,ordercpp); //idb = idb[order];
+    reorder(stratumb,ordercpp); //stratumb = stratumb[order];
+    reorder(timeb,ordercpp); //timeb = timeb[order];
+    reorder(eventb,ordercpp); //eventb = eventb[order];
+    reorder(treatb,ordercpp); //= treatb[order];
+    reorder(censor_timeb,ordercpp); //  censor_timeb = censor_timeb[order];
+    reorder(pdb,ordercpp);  //  pdb = pdb[order];
+    reorder(pd_timeb,ordercpp); // = pd_timeb[order];
+    reorder(swtrtb,ordercpp); //swtrtb = swtrtb[order];
+    reorder(swtrt_timeb,ordercpp); // = swtrt_timeb[order];
+    reorder(row,ordercpp);
+  }
+
+  //zb = subset_matrix_by_row(zb, order);
+  //zb_aft = subset_matrix_by_row(zb_aft, order);
+
   // time and event adjusted for treatment switching
-  std::vector<double> t_star = timeb;
-  std::vector<int> d_star = eventb;
-  
+  std::vector<double> t_star = timeb; //clone(timeb);
+  std::vector<int> d_star = eventb; //clone(eventb);
+
   double psi0hat = 0, psi0lower = 0, psi0upper = 0;
   double psi1hat = 0, psi1lower = 0, psi1upper = 0;
-  
+
   //DataFrame data_outcome;
-  
+
   // treat arms that include patients who switched treatment
-  std::vector<int> treats(1);
-  treats[0] = 0;
-  if (!shared.swtrt_control_only) {
+  //IntegerVector treats(1);
+  //treats[0] = 0;
+  std::vector<int> treats(1,0);
+  if (!swtrt_control_only) {
     treats.push_back(1);
   }
   
   int K = static_cast<int>(treats.size());
   for (h=0; h<K; h++) {
     // post progression data
-    //IntegerVector l = which((treatb == h) & (pdb == 1));
-    //IntegerVector id2 = idb[l];
-    //NumericVector time2 = timeb[l] - pd_timeb[l] + shared.offset;
-    //IntegerVector event2 = eventb[l];
-    //IntegerVector swtrt2 = swtrtb[l];
-    std::vector<int> id2, event2, swtrt2;
-    std::vector<double> time2;
-    for(int i = 0; i < treatb.size(); i++){
-      if(treatb[i] == h && pdb[i] == h){
-        id2.push_back(idb[i]);
-        time2.push_back(timeb[i]- pd_timeb[i]+ shared.offset);
-        event2.push_back(eventb[i]);
-        swtrt2.push_back(swtrtb[i]);
+    std::vector<int> l;
+    l.reserve(treatb.size());
+    for(int i = 0; i < (int)treatb.size(); i++){
+      // change treatb[i] == h to treatb[i] == treats[h] later if needed
+      if(treatb[i] == h && pdb[i] == 1){
+        l.push_back(i);
       }
     }
+    int ls = (int)l.size();
+    std::vector<int> rows_pp; rows_pp.reserve(ls);
+    for (int ii = 0; ii < l.size(); ++ii) { 
+      //1 index so we are subtracting -1 for now 
+      rows_pp.push_back(row[l[ii]]);  // map logical index -> base row
+    }
+    std::vector<int> id2;       id2.reserve(ls);
+    std::vector<double> time2;  time2.reserve(ls);
+    std::vector<int> event2;    event2.reserve(ls);
+    std::vector<int> swtrt2;    swtrt2.reserve(ls);
+    for(int i : l){
+      id2.push_back(idb[i]);
+      time2.push_back(timeb[i] - pd_timeb[i] + offset);
+      event2.push_back(eventb[i]);
+      swtrt2.push_back(swtrtb[i]);
+    }
+ 
+    // rcpp containers -> stl container -> rcpp List
+    trial_data td;
+    td.pps = time2;
+    td.event = event2;
+    td.swtrt = swtrt2;
+    td.aft = &zb_aft;
+    td.order_pp = &rows_pp;
 
-    List fit1;
-    DataFrame data1;
-    if(true){
-    //if(k>=0){
-      //modify this from our regular standard function into
-      // rcpp containers -> stl container -> rcpp container
-      // a lot of this is a temporary band aid fix until finalization of the pipeline
-      std::vector<std::string> covariates_aft_std = to_std<std::vector<std::string>>(covariates_aft);
-      trial_data td;
-      td.pps = to_std<std::vector<double>>(time2);
-      td.event = to_std<std::vector<int>>(event2);
-      td.swtrt = to_std<std::vector<int>>(swtrt2);
-
-
-      td.aft_names.reserve(q+p2+1); // covariates for the outcome model
-      td.aft.reserve(q+p2+1);
-      
-      std::vector<double> swtrt_as_double(td.swtrt.size());
-      for(size_t i = 0; i < td.swtrt.size(); ++i) {
-        swtrt_as_double[i] = static_cast<double>(td.swtrt[i]);
-      }
-      td.aft_names.push_back("swtrt");
-      td.aft.push_back(std::move(swtrt_as_double));
-      for(int j = 0; j < q + p2; ++j){
-        // since we dont have dataframe we will instead use a vector of strings 
-        const std::string& name = covariates_aft_std[j+1];
-        std::vector<double> col; 
-        col.reserve(l.size());
-        for(int ii = 0; ii < l.size(); ++ii) {
-          int i = l[ii]; // -1 for 0-based indexing from R's 1-based but not needed
-          col.push_back(zb_aft(i,j));
-        }
-        td.aft_names.push_back(name);
-        td.aft.push_back(std::move(col));
-      }
-      std::vector<double> init_cpp; 
-
-      safety_check_col_aft(td);
-      fit1 = lifereg_purecpp(
-        td, {}, {}, "pps", "", "event", 
-        covariates_aft_std, "", "", "", shared.dist, init_cpp, 0, 0, shared.alpha, 
-        50, 1.0e-9);
-    } 
-
-    DataFrame sumstat1 = DataFrame(fit1["sumstat"]);
-    bool fail1 = sumstat1["fail"];
-    if (fail1 == 1) fail = 1;
+    //Rcpp::Rcout << "[tsesimp_mt] line 853 before lifereg call" << std::endl;
+    fit1_cpp = lifereg_purecpp(
+      td, covariates_aft, dist, 
+      init_cpp, 0, 0, alpha, 50, 1.0e-9);
+    //Rcpp::Rcout << "[tsesimp_mt] line 857 after lifereg call" << std::endl;
     
-    DataFrame parest1 = DataFrame(fit1["parest"]);
-    NumericVector beta1 = parest1["beta"];
-    NumericVector sebeta1 = parest1["sebeta"];
+    bool fail1 = fit1_cpp.fail; //sumstat1["fail"];
+    if (fail1 == true) fail = true;
+    
+    //DataFrame parest1 = DataFrame(fit1["parest"]);
+    std::vector<double> beta1 = fit1_cpp.beta; //["beta"];
+    std::vector<double> sebeta1 = fit1_cpp.sebeta; //["sebeta"];
 
     //int isw = k;
     double psihat = -beta1[1];
-    double psilower = -(beta1[1] + shared.zcrit*sebeta1[1]);
-    double psiupper = -(beta1[1] - shared.zcrit*sebeta1[1]);
+    double psilower = -(beta1[1] + zcrit*sebeta1[1]);
+    double psiupper = -(beta1[1] - zcrit*sebeta1[1]);
     
     // calculate counter-factual survival times
     double a = std::exp(psihat);
     double c0 = std::min(1.0, a);
-    for (i=0; i<shared.n; i++) {
+    for (i=0; i<n; i++) {
       if (treatb[i] == h) {
         double b2, u_star, c_star;
         if (swtrtb[i] == 1) {
           b2 = pdb[i] == 1 ? pd_timeb[i] : swtrt_timeb[i];
-          b2 = b2 - shared.offset;
+          b2 = b2 - offset;
           u_star = b2 + (timeb[i] - b2)*a;
         } else {
           u_star = timeb[i];
         }
         
-        if (shared.recensor) {
+        if (recensor) {
           c_star = censor_timeb[i]*c0;
           t_star[i] = std::min(u_star, c_star);
           d_star[i] = c_star < u_star ? 0 : eventb[i];
@@ -208,66 +222,43 @@ RepResult run_replicate_cpp(
       psi1lower = psilower;
       psi1upper = psiupper;
     }
-    
   }
-  
-  DataFrame data_outcome_r;
-  // Cox model for hypothetical treatment effect estimate
-  data_outcome_r = DataFrame::create(
-    Named("uid") = idb,
-    Named("t_star") = t_star,
-    Named("d_star") = d_star,
-    Named("treated") = treatb);
-  
-  data_outcome_r.push_back(stratumb, "ustratum");
-  
-  for (j=0; j<p; j++) {
-    String zj = covariates[j+1];
-    NumericVector u = zb(_,j);
-    data_outcome_r.push_back(u, zj);
-  }
-  
-  //List fit_outcome = phregcpp(
-  //  data_outcome, "", "ustratum", "t_star", "", "d_star",
-  //  covariates, "", "", "", ties, init, 
-  //  0, 0, 0, 0, 0, alpha, 50, 1.0e-9);
-  
-  
+
   //
   coxdata data_outcome;
-  List fit_outcome;
+  //List fit_outcome;
   data_outcome.n = t_star.size();
-  data_outcome.p = 1 + zb.ncol(); // + 1 bc it gives n of columns and we want to iterate over p 
+  data_outcome.p = 1 + zb.ncols(); // + 1 bc it gives n of columns and we want to iterate over p 
 
-  data_outcome.time = to_std<std::vector<double>>(t_star);
-  data_outcome.event = to_std<std::vector<int>>(d_star);
-  data_outcome.stratum = to_std<std::vector<int>>(stratumb);
+  data_outcome.time = t_star;
+  data_outcome.event = d_star;
+  data_outcome.stratum = stratumb;
   // Pack x row-major: [treated | zb]
   data_outcome.x.resize((size_t)data_outcome.n * (size_t)data_outcome.p);
 
   for (int i = 0; i < data_outcome.n; ++i) {
     data_outcome.x[(size_t)i * data_outcome.p + 0] = (double)treatb[i];   // treated is column 0
     for (int j = 0; j < p; ++j) {
-      data_outcome.x[(size_t)i * data_outcome.p + (size_t)(1 + j)] = zb(i, j);
+      data_outcome.x[(size_t)i * data_outcome.p + (size_t)(1 + j)] = zb(row[i], j);
     }
   }
-
-  if(true){
-    fit_outcome = phreg_purecpp(data_outcome,cov_names_cox,ties,{},
-                                0,0,0,0,0,alpha,50,1.0e-9);
-  }
-
-  DataFrame sumstat_cox = DataFrame(fit_outcome["sumstat"]);
-  bool fail_cox = sumstat_cox["fail"];
-  if (fail_cox == 1) fail = 1;
   
-  DataFrame parest = DataFrame(fit_outcome["parest"]);
-  NumericVector beta = parest["beta"];
-  NumericVector sebeta = parest["sebeta"];
-  NumericVector pval = parest["p"];
-  double hrhat = std::exp(beta[0]);
-  double hrlower = std::exp(beta[0] - shared.zcrit*sebeta[0]);
-  double hrupper = std::exp(beta[0] + shared.zcrit*sebeta[0]);
+  fit_outcome_cpp = phreg_purecpp(data_outcome,cov_names_cox,ties,init_cpp,
+                              0,0,0,0,0,alpha,50,1.0e-9);
+
+  
+
+  //DataFrame sumstat_cox = DataFrame(fit_outcome["sumstat"]);
+  bool fail_cox = fit_outcome_cpp.fail; //["fail"];
+  if (fail_cox == 1) fail = 1;
+
+  //DataFrame parest = DataFrame(fit_outcome["parest"]);
+  std::vector<double> beta = fit_outcome_cpp.beta; //["beta"];
+  std::vector<double> sebeta = fit_outcome_cpp.sebeta; //parest["sebeta"]; 
+  std::vector<double> pval = fit_outcome_cpp.p; //parest["p"];
+  double hrhat = exp(beta[0]);
+  double hrlower = exp(beta[0] - zcrit*sebeta[0]);
+  double hrupper = exp(beta[0] + zcrit*sebeta[0]);
   double pvalue = pval[0];
 
   // CORE RESULTS FOR run_replicate in bootstrap loop
@@ -277,12 +268,12 @@ RepResult run_replicate_cpp(
   result.psi0hat = psi0hat;
   result.psi1hat = psi1hat;
 
-  // optional stuff add below
+  // any additional outputs, make changes to the RepResult struct and add below :)
 
 
   return result;
 };
-*/
+
 
 
 // [[Rcpp::export]]
@@ -781,9 +772,11 @@ List tsesimpcpp_mt(const DataFrame data,
                   NumericVector init(1, NA_REAL);
                   std::vector<double> init_cpp(1,std::numeric_limits<double>::quiet_NaN()); 
                   
-                  List fit1;
+                  List fit1 = List::create(Named("junk") = "dog");
+                  liferegOut fit1_cpp; // native cpp version
                   DataFrame data1;
-                  List fit_outcome;
+                  List fit_outcome = List::create(Named("junk2") = "dog2");
+                  coxfitout fit_outcome_cpp; // native cpp version
 
                   bool uselifepure = true;
                   bool usephregpure = true;
@@ -908,7 +901,7 @@ List tsesimpcpp_mt(const DataFrame data,
 
                       //safety_check_col_aft(td);
                       //Rcpp::Rcout << "[tsesimp_mt] line 853 before lifereg call" << std::endl;
-                      fit1 = lifereg_purecpp(
+                      fit1_cpp = lifereg_purecpp(
                         td, covariates_aft, dist, 
                         init_cpp, 0, 0, alpha, 50, 1.0e-9);
                       //Rcpp::Rcout << "[tsesimp_mt] line 857 after lifereg call" << std::endl;
@@ -937,14 +930,15 @@ List tsesimpcpp_mt(const DataFrame data,
                       0, 0, alpha, 50, 1.0e-9); */
                       }
                     }
-                    
-                    DataFrame sumstat1 = DataFrame(fit1["sumstat"]);
-                    bool fail1 = sumstat1["fail"];
+
+                    // we can build this with fit1_cpp later if we really care about this
+                    //DataFrame sumstat1 = DataFrame(fit1["sumstat"]);
+                    bool fail1 = fit1_cpp.fail; //sumstat1["fail"];
                     if (fail1 == 1) fail = 1;
                     
-                    DataFrame parest1 = DataFrame(fit1["parest"]);
-                    NumericVector beta1 = parest1["beta"];
-                    NumericVector sebeta1 = parest1["sebeta"];
+                    //DataFrame parest1 = DataFrame(fit1["parest"]);
+                    std::vector<double> beta1 = fit1_cpp.beta; //["beta"];
+                    std::vector<double> sebeta1 = fit1_cpp.sebeta; //["sebeta"];
 
                     //int isw = k;
                     double psihat = -beta1[1];
@@ -1036,7 +1030,7 @@ List tsesimpcpp_mt(const DataFrame data,
                   data_outcome_r.push_back(stratumb, "ustratum");
                   
                   
-
+                  // creates the data_outcome in r form for debugging/outputting during k == -1
                   for (j=0; j<p; j++) {
                     String zj = covariates[j+1];
                     NumericVector u; //= zb(_,j);
@@ -1072,19 +1066,19 @@ List tsesimpcpp_mt(const DataFrame data,
                       }
                     }
                     
-                    fit_outcome = phreg_purecpp(data_outcome,cov_names_cox,ties,init_cpp,
+                    fit_outcome_cpp = phreg_purecpp(data_outcome,cov_names_cox,ties,init_cpp,
                                                 0,0,0,0,0,alpha,50,1.0e-9);
                   
-                }
+                  }
 
-                  DataFrame sumstat_cox = DataFrame(fit_outcome["sumstat"]);
-                  bool fail_cox = sumstat_cox["fail"];
+                  //DataFrame sumstat_cox = DataFrame(fit_outcome["sumstat"]);
+                  bool fail_cox = fit_outcome_cpp.fail; //["fail"];
                   if (fail_cox == 1) fail = 1;
                   
-                  DataFrame parest = DataFrame(fit_outcome["parest"]);
-                  NumericVector beta = parest["beta"];
-                  NumericVector sebeta = parest["sebeta"];
-                  NumericVector pval = parest["p"];
+                  //DataFrame parest = DataFrame(fit_outcome["parest"]);
+                  std::vector<double> beta = fit_outcome_cpp.beta; //["beta"];
+                  std::vector<double> sebeta = fit_outcome_cpp.sebeta; //parest["sebeta"]; 
+                  std::vector<double> pval = fit_outcome_cpp.p; //parest["p"];
                   double hrhat = exp(beta[0]);
                   double hrlower = exp(beta[0] - zcrit*sebeta[0]);
                   double hrupper = exp(beta[0] + zcrit*sebeta[0]);

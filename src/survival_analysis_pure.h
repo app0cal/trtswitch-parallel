@@ -73,10 +73,12 @@ struct liferegOut{
   bool fail;
 
   // sum stat
+  //add rest if needed
 
   // parest
-  std::vector<int> beta; //beta0
-  std::vector<int> sebeta; //rsebeta0
+  std::vector<double> beta; //beta0
+  std::vector<double> sebeta; //rsebeta0
+  // add rest if needed
 };
 
 /*
@@ -239,7 +241,7 @@ double liferegplloop_cpp(
   double l0
 );
 
-List lifereg_purecpp(
+liferegOut lifereg_purecpp(
   //const DataFrame data expects trial_data with ...
   const trial_data& data,
   const std::vector<std::string>& covariates,
@@ -252,7 +254,7 @@ List lifereg_purecpp(
   const double eps
 );
 
-List phreg_purecpp(
+coxfitout phreg_purecpp(
   const coxdata data,
   const std::vector<std::string> covariates,
   const std::string ties,

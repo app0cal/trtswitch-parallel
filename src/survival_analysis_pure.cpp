@@ -1562,7 +1562,7 @@ double liferegplloop_cpp(int p, std::vector<double> par, void *ex,
 
 
 // [[Rcpp::export]]
-List lifereg_purecpp(
+liferegOut lifereg_purecpp(
     //const DataFrame data expects trial_data with 
     const trial_data& data,
     const std::vector<std::string>& covariates = {},
@@ -2343,7 +2343,7 @@ List lifereg_purecpp(
   // convert the vectors to Rcpp types
   //NumericVector expbeta0 = exp(beta0);
   //Rcpp::Rcout << "[liferegloop_cpp] beta0.size()=" << beta0.size() << std::endl;
-  NumericVector expbeta0(beta0.size());
+  std::vector<double> expbeta0(beta0.size());
   for (size_t i=0; i<beta0.size(); i++) {
     //if (i < 5) Rcpp::Rcout << "beta0[" << i << "]=" << beta0[i] << std::endl;
     expbeta0[i] = std::exp(beta0[i]);
@@ -2352,28 +2352,26 @@ List lifereg_purecpp(
   //Rcpp::Rcout << "[liferegloop_cpp] line 2395, expbeta0 done" << std::endl;
 
   //Rcpp::Rcout << "[liferegloop_cpp] line 2397, converting beta0, sebeta0, rsebeta0, z0 to NumericVector" << std::endl;
-  NumericVector beta0_r = NumericVector(beta0.begin(), beta0.end());
-  NumericVector sebeta0_r = NumericVector(sebeta0.begin(), sebeta0.end());
-  NumericVector rsebeta0_r = NumericVector(rsebeta0.begin(), rsebeta0.end());
-  NumericVector z0(nreps*p);
+  //NumericVector beta0_r = NumericVector(beta0.begin(), beta0.end());
+  //NumericVector sebeta0_r = NumericVector(sebeta0.begin(), sebeta0.end());
+  //NumericVector rsebeta0_r = NumericVector(rsebeta0.begin(), rsebeta0.end());
+  std::vector<double> z0(nreps*p);
   //Rcpp::Rcout << "[liferegloop_cpp] line 2402, beta0_r, sebeta0_r, rsebeta0_r done" << std::endl;
-  if (!robust) z0 = beta0_r/sebeta0_r;
-  else z0 = beta0_r/rsebeta0_r;
-
-  //these two bottom dataframes are the key utputs
-  // anything inside these dataframes must be in rcpp types so we convert our stl containers into rcpp types again
-  // we can completely eradicate this part whenever we bootstrap phregcpp to make it return stl types instead of dataframes
-  
-  //for loop checking if data wrangling error
-  for (size_t r = 0; r < vbeta0.size(); ++r) {
-    if (vbeta0[r].size() != (size_t)p) {
-      Rcpp::stop("\t\tvbeta0 row %zu has length %zu, expected %d", r, vbeta0[r].size(), p);
-    }
+  //if (!robust) z0 = beta0_r/sebeta0_r;
+  //else z0 = beta0_r/rsebeta0_r;
+  for(int i = 0; i < nreps*p; i++){
+    z0[i] = beta0[i]/sebeta0[i];
   }
-  //Rcpp::Rcout << "\t[liferegloop_cpp] line 2416, wrapping start" << std::endl;
-  //for sumstat
 
-  
+  liferegOut result; 
+  result.fail = false; // any error handling beforehand should have creates result and passed back fail;
+  result.beta = beta0;
+  result.sebeta = sebeta0;
+  // add more stuff to return if needed/wanted
+
+  return result;
+
+  /*
   IntegerVector nobs_r = Rcpp::wrap(nobs);
   IntegerVector nevents_r = Rcpp::wrap(nevents);
   NumericVector loglik0_r = Rcpp::wrap(loglik0);
@@ -2439,7 +2437,6 @@ List lifereg_purecpp(
   }
 
   // reimplement this after checking numerical accuracy of output
-  /*
   if (has_rep) {
     for (i=0; i<p_rep; i++) {
       String s = rep[i];
@@ -2458,7 +2455,7 @@ List lifereg_purecpp(
       }
     }
   }
-  */
+  
   //add functionality for this in another function that requires it but here it is not needed.
 
   List result = List::create(
@@ -2466,6 +2463,7 @@ List lifereg_purecpp(
     _["parest"] = parest);
 
   return result;
+  */
 }
 
 // bottom are phregcpp functions and helpers
@@ -2971,7 +2969,7 @@ phregLoopOut phregloop_cpp(int p, const std::vector<double>& par, void *ex,
 // side benefit AFTER multi threadding
 */
 // [[Rcpp::export]]
-List phreg_purecpp(
+coxfitout phreg_purecpp(
         const coxdata data,
         const std::vector<std::string> covariates,
         const std::string ties = "efron",
@@ -3728,6 +3726,16 @@ List phreg_purecpp(
   #endif
   // returns results after this, previously had code to turn vectors/matrixes back into R objects but not needed anymore
   
+  coxfitout output;
+  output.fail = false; // should not have failed at this point, (when fail conditions are met it should instead instantiate coxfitout type and returning it w result.fail = true)
+  output.beta = beta0;
+  output.sebeta = sebeta0;
+  output.p = prob0;
+  return output;
+
+  //additional parameters below that aren't hard required
+
+  /*
   //Rcpp::Rcout << "line 3733, [phreg_purecpp] right before the conversion back into R objects" << std::endl;
   NumericVector sebeta0_r = wrap(sebeta0);
   NumericVector beta0_r = wrap(beta0);
@@ -3981,5 +3989,5 @@ List phreg_purecpp(
     #endif
   }
 
-  return result;
+  return result;*/
 }

@@ -13,7 +13,7 @@ using namespace Rcpp;
 #include <omp.h>
 #include <R_ext/Print.h>
 
-
+// shared inputs struct to pass by a const reference to every bootstrap
 struct sharedInputs{
   int n, q, p, p2; 
   std::vector<std::string> covariates;
@@ -26,6 +26,7 @@ struct sharedInputs{
   double offset;
 };
 
+// shared structure for bootstrapping process, each bootstrap will be a bit different because of the rng calls beforehand
 struct replicateInputs{ 
   std::vector<int> &idb, &stratumb, &eventb, &treatb;
   std::vector<int> &pdb, &swtrtb;
@@ -34,15 +35,18 @@ struct replicateInputs{
   std::vector<int> &row;
 };
 
+// Main notes for the function:
 // pure cpp version of lambda f() only computes core outputs
 // parameters for function are based off lambda capture list + parameter list below
+// almost identical work to lambda function f() but replaces unsafe R object calls inside the boostrap hot loop with pure C++ structs and methods,
+// and since f() doesn't return outputs after k == -1 we can skip building extra outputs for performance and efficency (this can be re-enabled very easily)
 RepResult run_replicate_cpp(  
   int k,  // current index 
   // const refs to base data + boot indices + config 
   const sharedInputs& shared,
   replicateInputs& in){
 
-  // AFTER NUMERICAL PARITY CHECKS HERE REMOVE AUTO KEYWORDS, auto makes it much more work to debug so we can just swap back to regular types
+  // using auto makes it much easier to just figure out what everything is, but this may be changed to be more explicit for debugging purposes later. 
   // shared alias
   auto& covariates_aft = shared.covariates_aft;
   auto& n = shared.n, & q = shared.q, &p = shared.p, &p2 = shared.p2;
@@ -70,27 +74,21 @@ RepResult run_replicate_cpp(
   
   int h, i, j;
   bool fail = false; // whether any model fails to converge
-  //NumericVector init(1, NA_REAL);
   std::vector<double> init_cpp(1,std::numeric_limits<double>::quiet_NaN()); 
 
-  //List fit1 = List::create(Named("junk") = "dog");
   liferegOut fit1_cpp; // native cpp version
-  //DataFrame data1;
-  //List fit_outcome = List::create(Named("junk2") = "dog2");
   coxfitout fit_outcome_cpp; // native cpp version
 
   bool uselifepure = true;
   bool usephregpure = true;
 
   // order data by treat
-  //IntegerVector order = seq(0, n-1);
   std::vector<int> ordercpp = seq_cpp(0,n-1);
   std::sort(ordercpp.begin(), ordercpp.end(), [&](int i, int j) {
     return (treatb[i] < treatb[j]);
   });
-  //std::vector<int> ordercpp = seq_cpp(0,n-1);
 
-  // checks if row and order passed are identity (so no need to reorder)
+  // quickly checks if row and order passed are identity (so no need to reorder)
   bool is_identity = true;
   for (int i = 0; i < n; ++i) {
     if (row[i] != i || ordercpp[i] != i){ 
@@ -100,8 +98,6 @@ RepResult run_replicate_cpp(
   }
   // when called from the bootstrap check should auto sort but we have this as a backup just in case!
   if (!is_identity) {
-    //Rcpp::Rcout << "identity fail" << std::endl;
-    // reorder vectors AND reorder matrices (see 3B)
     reorder(idb,ordercpp); //idb = idb[order];
     reorder(stratumb,ordercpp); //stratumb = stratumb[order];
     reorder(timeb,ordercpp); //timeb = timeb[order];
@@ -115,21 +111,15 @@ RepResult run_replicate_cpp(
     reorder(row,ordercpp);
   }
 
-  //zb = subset_matrix_by_row(zb, order);
-  //zb_aft = subset_matrix_by_row(zb_aft, order);
 
   // time and event adjusted for treatment switching
-  std::vector<double> t_star = timeb; //clone(timeb);
-  std::vector<int> d_star = eventb; //clone(eventb);
+  std::vector<double> t_star = timeb; 
+  std::vector<int> d_star = eventb; 
 
   double psi0hat = 0, psi0lower = 0, psi0upper = 0;
   double psi1hat = 0, psi1lower = 0, psi1upper = 0;
 
-  //DataFrame data_outcome;
-
   // treat arms that include patients who switched treatment
-  //IntegerVector treats(1);
-  //treats[0] = 0;
   std::vector<int> treats(1,0);
   if (!swtrt_control_only) {
     treats.push_back(1);
@@ -149,7 +139,6 @@ RepResult run_replicate_cpp(
     int ls = (int)l.size();
     std::vector<int> rows_pp; rows_pp.reserve(ls);
     for (int ii = 0; ii < l.size(); ++ii) { 
-      //1 index so we are subtracting -1 for now 
       rows_pp.push_back(row[l[ii]]);  // map logical index -> base row
     }
     std::vector<int> id2;       id2.reserve(ls);
@@ -163,7 +152,6 @@ RepResult run_replicate_cpp(
       swtrt2.push_back(swtrtb[i]);
     }
  
-    // rcpp containers -> stl container -> rcpp List
     trial_data td;
     td.pps = time2;
     td.event = event2;
@@ -171,20 +159,16 @@ RepResult run_replicate_cpp(
     td.aft = &zb_aft;
     td.order_pp = &rows_pp;
 
-    //Rcpp::Rcout << "[tsesimp_mt] line 853 before lifereg call" << std::endl;
     fit1_cpp = lifereg_purecpp(
       td, covariates_aft, dist, 
       init_cpp, 0, 0, alpha, 50, 1.0e-9);
-    //Rcpp::Rcout << "[tsesimp_mt] line 857 after lifereg call" << std::endl;
     
-    bool fail1 = fit1_cpp.fail; //sumstat1["fail"];
+    bool fail1 = fit1_cpp.fail; 
     if (fail1 == true) fail = true;
     
-    //DataFrame parest1 = DataFrame(fit1["parest"]);
-    std::vector<double> beta1 = fit1_cpp.beta; //["beta"];
-    std::vector<double> sebeta1 = fit1_cpp.sebeta; //["sebeta"];
+    std::vector<double> beta1 = fit1_cpp.beta; 
+    std::vector<double> sebeta1 = fit1_cpp.sebeta; 
 
-    //int isw = k;
     double psihat = -beta1[1];
     double psilower = -(beta1[1] + zcrit*sebeta1[1]);
     double psiupper = -(beta1[1] - zcrit*sebeta1[1]);
@@ -226,15 +210,13 @@ RepResult run_replicate_cpp(
     }
   }
 
-  //
   coxdata data_outcome;
-  //List fit_outcome;
   data_outcome.n = t_star.size();
   data_outcome.p = 1 + zb.ncols(); // + 1 bc it gives n of columns and we want to iterate over p 
-
   data_outcome.time = t_star;
   data_outcome.event = d_star;
   data_outcome.stratum = stratumb;
+
   // Pack x row-major: [treated | zb]
   data_outcome.x.resize((size_t)data_outcome.n * (size_t)data_outcome.p);
 
@@ -248,20 +230,15 @@ RepResult run_replicate_cpp(
   fit_outcome_cpp = phreg_purecpp(data_outcome,cov_names_cox,ties,init_cpp,
                               0,0,0,0,0,alpha,50,1.0e-9);
 
-  
-
-  //DataFrame sumstat_cox = DataFrame(fit_outcome["sumstat"]);
-  bool fail_cox = fit_outcome_cpp.fail; //["fail"];
+  bool fail_cox = fit_outcome_cpp.fail; 
   if (fail_cox == 1) fail = 1;
 
-  //DataFrame parest = DataFrame(fit_outcome["parest"]);
-  std::vector<double> beta = fit_outcome_cpp.beta; //["beta"];
-  std::vector<double> sebeta = fit_outcome_cpp.sebeta; //parest["sebeta"]; 
-  std::vector<double> pval = fit_outcome_cpp.p; //parest["p"];
+  std::vector<double> beta = fit_outcome_cpp.beta; 
+  std::vector<double> sebeta = fit_outcome_cpp.sebeta;  
+  std::vector<double> pval = fit_outcome_cpp.p; 
   double hrhat = exp(beta[0]);
   double hrlower = exp(beta[0] - zcrit*sebeta[0]);
   double hrupper = exp(beta[0] + zcrit*sebeta[0]);
-  double pvalue = pval[0];
 
   // CORE RESULTS FOR run_replicate in bootstrap loop
   RepResult result;
@@ -302,12 +279,13 @@ List tsesimpcpp_mt(const DataFrame data,
                 const double offset = 1,
                 const bool boot = 1,
                 const int n_boot = 1000,
-                const int seed = NA_INTEGER) {
-  //Rcpp::Rcout << "[tsesimp] line 313 start!" << std::endl;
+                const int seed = NA_INTEGER,
+                const int threads = 1) {
   Rcpp::RNGScope scope;
   Rcpp::Rcout << "omp max threads: " << omp_get_max_threads() << "\n";
   int i, j, k, n = data.nrow();
-  
+  int threadNum = threads;
+
   int p = static_cast<int>(base_cov.size());
   if (p == 1 && (base_cov[0] == "" || base_cov[0] == "none")) p = 0;
   
@@ -744,16 +722,25 @@ List tsesimpcpp_mt(const DataFrame data,
   if (n_boot < 100) {
     stop("n_boot must be greater than or equal to 100");
   }
+
+  int maxThreads = omp_get_max_threads();
+  if (threadNum < 0 ){
+    stop("threads must be greater >= 0 (0 = auto)");
+  }
+  if (threadNum == NA_INTEGER || threadNum == 0){
+    threadNum = maxThreads; 
+  } else {
+    threadNum = std::min(threadNum,maxThreads);
+  }
   
   DataFrame lr = lrtest(data, "", stratum, treat, time, event, 0, 0);
   double logRankPValue = lr["logRankPValue"];
   double zcrit = R::qnorm(1-alpha/2, 0, 1, 1, 0);
   
-  // Current goals:
-  // - lambda function can be replaced with seperate function call based of f()
-  // - fix per thread RNG
-  // Important ideas/changes:
-  // - remove reliance on names to extract from dataframe because we will explicitly create it in the C++ struct
+  // Main goals when rewriting this function:
+  // - maintain the functionality of the code, to work mostly on the observed data and bootstrapping call
+  // - code uses a mix of rcpp and pure cpp to still output certain results like fit_outcome and data_outcome for k == -1 scenarios
+  // - the lambda f() call is replaced in the bootstrapping loop with run_replicate(), reasons why are detailed more in the function comment description
   k = -1; // indicate the observed data
   auto f = [&k, data, has_stratum, stratum, p_stratum, u_stratum, 
             treat, treatwi, treatwn, treatwc, id, idwi, idwn, idwc,
@@ -767,9 +754,7 @@ List tsesimpcpp_mt(const DataFrame data,
                 IntegerVector& treatb, NumericVector& censor_timeb, 
                 IntegerVector& pdb, NumericVector& pd_timeb, 
                 IntegerVector& swtrtb, NumericVector& swtrt_timeb, 
-                const MatrixRM& zb, const MatrixRM& zb_aft, std::vector<int>& row
-              // r stuff below
-              )->List {
+                const MatrixRM& zb, const MatrixRM& zb_aft, std::vector<int>& row)->List {
                   int h, i, j;
                   bool fail = false; // whether any model fails to converge
                   NumericVector init(1, NA_REAL);
@@ -924,14 +909,6 @@ List tsesimpcpp_mt(const DataFrame data,
                         data1.push_back(u[l], zj);
                       }
 
-                      if(!uselifepure){
-                        /*
-                        Rcpp::Rcout << "using og lifereg" << std::endl;
-                      fit1 = liferegcpp(
-                      data1, "", "", "pps", "", "event", 
-                      covariates_aft_r, "", "", "", dist, init, 
-                      0, 0, alpha, 50, 1.0e-9); */
-                      }
                     }
 
                     // we can build this with fit1_cpp later if we really care about this
@@ -1181,37 +1158,16 @@ List tsesimpcpp_mt(const DataFrame data,
   
   // construct the confidence interval for HR
   String hr_CI_type;
-  //NumericVector hrhats(n_boot), psihats(n_boot), psi1hats(n_boot);
-  //LogicalVector fails(n_boot);
+
+  // these vectors were R ones before but even writing to R object vectors safely with thread indexing proved to cause issues with multi threading
   std::vector<double> hrhats(n_boot), psihats(n_boot), psi1hats(n_boot);
   std::vector<bool> fails(n_boot);
 
-  //debug variables 
-  int dbg_n_ok = NA_INTEGER;
-  double dbg_sdloghr = NA_REAL;
-  double dbg_tcrit = NA_REAL;
-  double dbg_M2 = NA_REAL;
-  double dbg_min_hr = NA_REAL;
-  double dbg_max_hr = NA_REAL;
-  double dbg_alpha = alpha;   // capture what C++ thinks alpha is
   if (!boot) { // use Cox model to construct CI for HR if no boot
     hr_CI_type = "Cox model";
   } else { // bootstrap the entire process to construct CI for HR
     //Rcpp::Rcout << "[tsesimp_mt] line 1130, before bootstrapping" << std::endl;
     if (seed != NA_INTEGER) set_seed(seed);
-    
-    
-    //std::vector<int> idb(n), stratumb(n), eventb(n), treatb(n);
-    //std::vector<int> pdb(n), swtrtb(n);
-    //std::vector<double> timeb(n), censor_timeb(n), pd_timeb(n), swtrt_timeb(n);
-    //std::vector<std::vector<double>> zb(n,std::vector<double>(p)), zb_aft(n,std::vector<double>(q+p2));
-
-    //IntegerVector idb(n), stratumb(n), eventb(n), treatb(n);
-    //IntegerVector pdb(n), swtrtb(n);
-    //NumericVector timeb(n), censor_timeb(n), pd_timeb(n), swtrt_timeb(n);
-    //MatrixRM zb (zn_cpp.nrows(),zn_cpp.ncols()), zb_aft (zncpp_aft.nrows(),zncpp_aft.ncols());
-    std::vector<int> boot_row(n);
-    std::iota(boot_row.begin(),boot_row.end(),0);
 
     // sort data by treatment group
     IntegerVector idx0 = which(treatn == 0);
@@ -1239,9 +1195,8 @@ List tsesimpcpp_mt(const DataFrame data,
     swtrt_timen = swtrt_timen[order];
     MatrixRM zn_sorted = permute_rows(zn_cpp,ordercpp);
     MatrixRM zn_aft_sorted = permute_rows(zncpp_aft,ordercpp);
-    //reorder(boot_row, ordercpp);
-    //zn = subset_matrix_by_row(zn, order);
-    //zn_aft = subset_matrix_by_row(zn_aft, order);
+    
+    //convert everything into std vectors to avoid touching R objects at all cost (causes crashes xd)
     std::vector<int> idn_cpp(idn.begin(), idn.end());
     std::vector<int> stratumn_cpp(stratumn.begin(), stratumn.end());
     std::vector<double> timen_cpp(timen.begin(), timen.end());
@@ -1258,7 +1213,8 @@ List tsesimpcpp_mt(const DataFrame data,
       dist, recensor, swtrt_control_only,
       alpha, zcrit, ties, offset};
 
-    // moved computation of the RNG before worker thread
+    // moved computation of the RNG before worker thread into a 2D array
+    // main benefit is reproducible RNG based on the seed
     std::vector<std::vector<int>> boot_index(n_boot, std::vector<int>(n));
     for (int k = 0; k < n_boot; ++k) {
       for (int i = 0; i < n0; ++i) {
@@ -1274,11 +1230,10 @@ List tsesimpcpp_mt(const DataFrame data,
         boot_index[k][i] = j;
       }
     }
+    Rcpp::Rcout << "# of threads rn:" << threadNum << std::endl;
 
-
-    Rcpp::Rcout << "[tsesimp_mt] line 1266, before main pragma loop" << std::endl;
-
-    #pragma omp parallel for schedule(static) default(none) \
+    // shared ensured that it will NEVER reuse variable names from outer scope (honestly could be removed but this ensures safety)
+    #pragma omp parallel for schedule(static) num_threads(threadNum) default(none) \
       shared(n_boot, n, p, q, p2, boot_index, \
         idn_cpp, stratumn_cpp, timen_cpp, eventn_cpp, treatn_cpp, censor_timen_cpp, pdn_cpp, pd_timen_cpp, swtrtn_cpp, swtrt_timen_cpp, \
         zn_sorted, zn_aft_sorted, fails, hrhats, psihats, psi1hats, input1) 
@@ -1290,16 +1245,8 @@ List tsesimpcpp_mt(const DataFrame data,
       MatrixRM zb (n,p), zb_aft (n,q + p2);
       // sample the data with replacement by treatment group
       for (int i=0; i<n; i++) {
-        // pre calculated now so we can remove this
-        //double u = R::runif(0,1);
-        //if (i < n0) {
-        //  j = static_cast<int>(std::floor(u*n0));
-        //} else {
-        //  j = n0 + static_cast<int>(std::floor(u*n1));
-        //}
         int j = boot_index[k][i];
-
-        // check scopoe of j here 
+ 
         idb[i] = idn_cpp[j];
         stratumb[i] = stratumn_cpp[j];
         timeb[i] = timen_cpp[j];
@@ -1318,22 +1265,15 @@ List tsesimpcpp_mt(const DataFrame data,
         for(int col = 0; col < q + p2; col++){
           zb_aft(i,col) = zn_aft_sorted(base_j,col);
         }
-        //zb(i,_) = zn(j,_);
-        //zb_aft(i,_) = zn_aft(j,_);
       }
 
       std::vector<int> row_rep(n);
       std::iota(row_rep.begin(), row_rep.end(), 0);
-      //Rcpp::Rcout << "current boot index:" << k<< std::endl;
       
       replicateInputs input2 = {idb,stratumb, eventb, treatb, 
         pdb, swtrtb, 
         timeb, censor_timeb, pd_timeb, swtrt_timeb,
         zb, zb_aft,row_rep};
-      
-      //std::vector<int> row_rep(n);
-      //std::iota(row_rep.begin(), row_rep.end(), 0);
-      //Rcpp::Rcout << "current boot index:" << k<< std::endl;
       
       RepResult output = run_replicate_cpp(k,input1,input2);
 
@@ -1342,49 +1282,7 @@ List tsesimpcpp_mt(const DataFrame data,
       psihats[k] = output.psi0hat;
       psi1hats[k] = output.psi1hat;
     }
-    Rcpp::Rcout << "[tsesimp_mt] line 1345, after bootstrapping loop" << std::endl;
     
-    // obtain bootstrap confidence interval for HR
-    //const double loghr = std::log(hrhat);
-
-    // Build canonical ok: non-fail AND valid HR
-
-    // double checks its not improperly built
-    /*for(int i = 0; i < n_boot; ++i){
-      if(!fails[i]){
-        double h = hrhats[i];
-        if (!std::isfinite(h) || h <= 0.0){
-          fails[i] = true;
-        }
-      }
-    }
-    LogicalVector ok(n_boot);
-    for (int i = 0; i < n_boot; ++i) {
-      ok[i] = !fails[i];
-    }
-    const int n_ok = Rcpp::sum(ok);
-
-    NumericVector loghrs = log(hrhats[ok]);
-    //int idx_lh = 0;
-    //for (int i = 0; i < n_boot; ++i) {
-      //  if (!ok[i]) continue;
-      //  loghrs[idx_lh++] = std::log(hrhats[i]);
-    //}
-
-    // sample standard deviation with n_ok - 1 denominator
-    double sdloghr = sd(loghrs);
-    double tcrit   = R::qt(1.0 - alpha / 2.0, n_ok - 1, 1, 0);
-    hrlower = std::exp(log(hrhat) - tcrit * sdloghr);
-    hrupper = std::exp(log(hrhat) + tcrit * sdloghr);
-
-    Rcpp::Rcout << "boot debug: n_boot" << n_boot << std::endl;
-    Rcpp::Rcout << "n_ok =" << n_ok << std::endl; 
-    Rcpp::Rcout << "sum_fails=" << std::accumulate(fails.begin(),fails.end(),0)
-    << " sdloghr=" << sdloghr
-    << " tcrit=" << tcrit
-    << " hrhat=" << hrhat
-    << " hr_CI_type=" << hr_CI_type.get_cstring()
-    << std::endl;*/
     // obtain bootstrap confidence interval for HR
     const double loghr = std::log(hrhat);
 
@@ -1415,11 +1313,6 @@ List tsesimpcpp_mt(const DataFrame data,
     sdloghr = std::sqrt(M2 / (count - 1));
     tcrit = R::qt(1.0 - alpha / 2.0, count - 1, 1, 0);
 
-    dbg_n_ok = count;
-    dbg_sdloghr = sdloghr;
-    dbg_tcrit = tcrit;
-    dbg_M2 = M2;
-
     hrlower = std::exp(loghr - tcrit * sdloghr);
     hrupper = std::exp(loghr + tcrit * sdloghr);
     hr_CI_type = "bootstrap";
@@ -1442,21 +1335,11 @@ List tsesimpcpp_mt(const DataFrame data,
       min_h = std::min(min_h, hrhats[i]);
       max_h = std::max(max_h, hrhats[i]);
     }
-    dbg_min_hr = std::isfinite(min_h) ? min_h : NA_REAL;
-    dbg_max_hr = std::isfinite(max_h) ? max_h : NA_REAL;
 
-    Rcpp::Rcout << "boot debug: n_boot" << n_boot << std::endl;
-    Rcpp::Rcout << "n_ok =" << n_ok << std::endl; 
-    Rcpp::Rcout << "sum_fails=" << std::accumulate(fails.begin(),fails.end(),0)
-    << " sdloghr=" << sdloghr
-    << " tcrit=" << tcrit
-    << " hrhat=" << hrhat
-    << " hr_CI_type=" << hr_CI_type.get_cstring()
-    << std::endl;
+    NumericVector psihats1(count);
+    NumericVector psi1hats1(count);
 
-    Rcpp::NumericVector psihats1(count);
-    Rcpp::NumericVector psi1hats1(count);
-
+    // we need to rebuild it like this because we are looking inside of a std vector rather than rcpp vector
     int pos = 0;
     for (int i = 0; i < n_boot; ++i) {
       if (!ok[i]) continue;
@@ -1465,13 +1348,11 @@ List tsesimpcpp_mt(const DataFrame data,
       ++pos;
     }
 
-    //NumericVector psihats1 = psihats[ok];
     double sdpsi = sd(psihats1);
     psilower = psihat - tcrit*sdpsi;
     psiupper = psihat + tcrit*sdpsi;
     psi_CI_type = "bootstrap";
     
-    //NumericVector psi1hats1 = psi1hats[ok];
     double sdpsi1 = sd(psi1hats1);
     psi1lower = psi1hat - tcrit*sdpsi1;
     psi1upper = psi1hat + tcrit*sdpsi1;
@@ -1505,16 +1386,7 @@ List tsesimpcpp_mt(const DataFrame data,
     Named("fit_outcome") = fit_outcome,
     Named("fail") = fail,
     Named("settings") = settings,
-  
-    //debug result stuff not needed
-    Named("debug_alpha") = dbg_alpha,
-    Named("debug_n_ok") = dbg_n_ok,
-    Named("debug_sdloghr") = dbg_sdloghr,
-    Named("debug_tcrit") = dbg_tcrit,
-    Named("debug_M2") = dbg_M2,
-    Named("debug_min_hr_boot") = dbg_min_hr,
-    Named("debug_max_hr_boot") = dbg_max_hr);
-    result.push_back("DEBUG_TAG_2026_01_01", "__debug_tag");
+    Named("threads_used") = threadNum);
 
   if (!swtrt_control_only) {
     result.push_back(psi1hat, "psi_trt");

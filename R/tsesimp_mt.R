@@ -74,6 +74,8 @@
 #' @param n_boot The number of bootstrap samples.
 #' @param seed The seed to reproduce the bootstrap results. The default is 
 #'   missing, in which case, the seed from the environment will be used.
+#' @param threads The number of threads to use if bootstrapping is enabled. 
+#'  Default is set to single threaded, 0 is for automatic max.
 #'
 #' @details We use the following steps to obtain the hazard ratio estimate
 #' and confidence interval had there been no treatment switching:
@@ -162,6 +164,8 @@
 #'     - \code{n_boot}: The number of bootstrap samples.
 #'
 #'     - \code{seed}: The seed to reproduce the bootstrap results.
+#' 
+#'     - \code{threads}: The # of threads to aid in bootstrapping.
 #'
 #' * \code{psi_trt}: The estimated causal parameter for the experimental 
 #'   group if \code{swtrt_control_only} is \code{FALSE}.
@@ -238,7 +242,8 @@ tsesimp_mt <- function(data, id = "id", stratum = "", time = "time",
                                   recensor = TRUE, admin_recensor_only = TRUE,
                                   swtrt_control_only = TRUE, alpha = 0.05, 
                                   ties = "efron", offset = 1, 
-                                  boot = TRUE, n_boot = 1000, seed = NA) {
+                                  boot = TRUE, n_boot = 1000, seed = NA,
+                                  threads = 1) {
   
   rownames(data) = NULL
   
@@ -306,7 +311,7 @@ tsesimp_mt <- function(data, id = "id", stratum = "", time = "time",
     recensor = recensor, admin_recensor_only = admin_recensor_only,
     swtrt_control_only = swtrt_control_only, alpha = alpha,
     ties = ties, offset = offset, 
-    boot = boot, n_boot = n_boot, seed = seed)
+    boot = boot, n_boot = n_boot, seed = seed, threads = threads)
   
   out$data_outcome$uid <- NULL
   out$data_outcome$ustratum <- NULL

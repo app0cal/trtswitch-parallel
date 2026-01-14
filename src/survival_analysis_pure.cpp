@@ -1560,6 +1560,15 @@ double liferegplloop_cpp(int p, std::vector<double> par, void *ex,
   return newbeta[k];
 }
 
+/*Notes and things to consider:
+  - The function is a direct translation of the R function liferegcpp
+  - The function expects a trial_data object which contains the necessary data
+  - The function handles various distributions and covariates
+  - Error handling is returns a "fail" liferegOut object
+  - The function returns a struct now, to be purely C++
+  - The function does NOT need to handle hasVariable checks for time2, rep, and stratum
+    because the higher level wrapper will handle that logic
+*/
 
 // [[Rcpp::export]]
 liferegOut lifereg_purecpp(
@@ -1573,20 +1582,8 @@ liferegOut lifereg_purecpp(
     const double alpha = 0.05,
     const int maxiter = 50,
     const double eps = 1.0e-9) {
-
-  /*Notes and things to consider:
-    - The function is a direct translation of the R function liferegcpp
-    - The function expects a trial_data object which contains the necessary data
-    - The function handles various distributions and covariates
-    - Error handling is done using exceptions
-    - The function returns a List similar to the R version
-    - The function does NOT need to handle hasVariable checks for time2, rep, and stratum
-      because the higher level wrapper will handle that logic
-  
-  */
-
   int h, i, j, k, n = data.pps.size(); //.nrows();
-  //covarities is covarities_aft from the capture list!
+
   int nvar = static_cast<int>(covariates.size()) + 1;
   if (nvar == 2 && (covariates[0] == "" || covariates[0] == "none")) {
     nvar = 1;
@@ -1614,9 +1611,8 @@ liferegOut lifereg_purecpp(
     throw std::runtime_error(errmsg);
   }
 
-  // TEMPORARILY INITIALIZED LIKE THIS BECAUSE TSESIMP NEVER CALLS THE ELSE FUNCTIONS!
+  // initialized like this because repn and stratumn will never pass arguments!
   std::vector<int> repn(n, 1);
-
   std::vector<int> stratumn(n, 1);
 
 
@@ -1638,7 +1634,7 @@ liferegOut lifereg_purecpp(
   }
 
   const std::vector<double>& timenz = data.pps;
-  std::vector<double> timen = timenz; // clone(timenz); // no need to clone, we can use the vector directly
+  std::vector<double> timen = timenz; 
   for (i=0; i<n; i++) {
     if (!std::isnan(timen[i]) && ((dist1 == "exponential") ||
         (dist1 == "weibull") || (dist1 == "lognormal") ||
@@ -1693,12 +1689,6 @@ liferegOut lifereg_purecpp(
     }
   }
 
-
-  //std::vector<std::vector<double>> zn(n, std::vector<double>(nvar, 0.0));
-  /* Experimental Change
-  - Turning the matrix from a 2D vector into a contigous array can help performance when multi-threading is enabled, 
-  (would not recommend turning every single into types of MatrixRMs)
-  */
   MatrixRM zn (n,nvar); //{n, nvar, std::vector<double>((size_t)n*nvar,0.0)};
   const MatrixRM& A = *data.aft;
   const std::vector<int>& rp = *data.order_pp;
@@ -1718,6 +1708,7 @@ liferegOut lifereg_purecpp(
 
   for (int col = 0; col < A.ncols(); ++col) {
     for (int i = 0; i < n; ++i) {
+        // add 2 not 1 because of swtrt
         zn(i, 2 + col) = A(rp[i], col);
       }
   }
@@ -1735,7 +1726,7 @@ liferegOut lifereg_purecpp(
   }
 
   std::vector<double> offsetn(n);
-  if (!data.offset.empty()) { // if it does have offset data
+  if (!data.offset.empty()) { 
     offsetn = data.offset;
     //this is a deep copy so its same as rcpp .clone(...)
   }
@@ -1804,20 +1795,6 @@ liferegOut lifereg_purecpp(
     }
   }
 
-  //order = which_cpp
-  /* replace w bottom to better reflect ideas
-  order = which_true(sub);
-  reorder(repn,order);
-  reorder(stratumn,order);
-  reorder(timen,order);
-  reorder(time2n,order);
-  reorder(eventn,order);
-  reorder(weightn,order);
-  reorder(offsetn,order);
-  reorder(idn,order);
-  RowIndexView zn_view{&zn, &order};
-  n = sum_bool_cpp(sub);
-  */
   std::vector<int> keep = which_true(sub);
 
   repn     = subset_by_idx(repn, keep);
@@ -1846,7 +1823,6 @@ liferegOut lifereg_purecpp(
       idx.push_back(i);
     }
   }
-  RowIndexView zn_view{ &zn, &row_idx };
 
   int nreps = static_cast<int>(idx.size());
   idx.push_back(n);
@@ -2815,11 +2791,14 @@ phregLoopOut phregloop_cpp(int p, const std::vector<double>& par, void *ex,
   return out;
 }
 
-/* NOTES: 
-// some initial variables will always be false because tsesimp never passes them as true, this will be fixed after multi threadding and numerical parity both are working properly
-// using ptrs and ownership to save on clones COULD improve performance but hesitant to continue on that idea without approval
-// side benefit AFTER multi threadding
+
+/*Notes and things to consider:
+  - The function is a direct translation of the R function phregcpp
+  - The function expects a coxfitout object which contains the necessary data
+  - Important notice, from tsesimp it will never pass true to any of the bools below, so a compiler flag was used to disable certain branches that will never be reached.
+      These branches will be re-enabled later, but for the purposes of creating a proof of concept quickly this is a shortcut I took. 
 */
+
 // [[Rcpp::export]]
 coxfitout phreg_purecpp(
         const coxdata data,
@@ -2843,20 +2822,6 @@ coxfitout phreg_purecpp(
 
   bool has_rep = false;
   std::vector<int> repn(n,1);
-  /* 
-  //THIS IS TEMPORARILY UNSUPPORTED, to test numerical parity accuracy first 
-  IntegerVector repn(n);
-  DataFrame u_rep;
-  int p_rep = static_cast<int>(rep.size());
-  if (p_rep == 1 && (rep[0] == "" || rep[0] == "none")) {
-    has_rep = 0;
-    repn.fill(1);
-  } else {
-    List out = bygroup(data, rep);
-    has_rep = 1;
-    repn = out["index"];
-    u_rep = DataFrame(out["lookup"]);
-  } */
 
   bool has_stratum;
   std::vector<int> stratumn(n,1); // alternativly we could do stratumn(n,1) but filling it later keeps it clearer which is nice
@@ -2911,12 +2876,10 @@ coxfitout phreg_purecpp(
   if(!has_event){
     // return fail "data must contain the event variable"
   } 
-  //if (!has_event) stop("data must contain the event variable");
 
 
   std::vector<int> eventnz = data.event;
   std::vector<int> eventn = eventnz;
-  //IntegerVector eventn = clone(eventnz);
 
   int n_event = static_cast<int>(data.event.size());
   int sumEvent = 0;
@@ -2932,31 +2895,15 @@ coxfitout phreg_purecpp(
     // return fail "at least 1 event is needed to fit the Cox model"
   }
 
-  //Matrix zn(n,p);
-  // built in tsesimp replaced with pointer view :D 
-
   MatrixRMView zbase{n, p, data.x.data()};
   std::vector<int> row_idx(n);
   std::iota(row_idx.begin(), row_idx.end(), 0);
 
   RowIndexViewView zn{&zbase, &row_idx};
-  
-  /*MatrixRM zn {n, p, std::vector<double>((size_t)n*p,0.0)};
-  if (p > 0) {
-    for (j=0; j<p; j++) {
-      String zj = covariates[j];
-      if (!hasVariable(data, zj)) {
-        stop("data must contain the variables in covariates");
-      }
-      NumericVector u = data[zj];
-      for (i=0; i<n; i++) {
-        zn(i,j) = u[i];
-      }
-    }
-  }*/
 
   bool has_weight = !data.weights.empty();
   std::vector<double> weightn(n,1.0);
+  
   /*
   // THIS IS TEMPORARILY UNSUPPORTED, to test numerical parity 
   NumericVector weightn(n, 1.0);
@@ -2979,7 +2926,7 @@ coxfitout phreg_purecpp(
     NumericVector offsetnz = data[offset];
     offsetn = clone(offsetnz);
   }
-    */
+  */
 
 
   bool has_id = !data.id.empty();
@@ -3045,10 +2992,8 @@ coxfitout phreg_purecpp(
   // exclude observations with missing values
   std::vector<bool> sub(n,1);
   for (i=0; i<n; i++) {
-    if ( //(repn[i] == NA_INTEGER) || (stratumn[i] == NA_INTEGER) ||
-        (std::isnan(timen[i])) || (eventn[i] == NA_INTEGER) ||
-        (std::isnan(weightn[i])) || (std::isnan(offsetn[i])) //||
-        //(idn[i] == NA_INTEGER)
+    if ((std::isnan(timen[i])) || (eventn[i] == NA_INTEGER) ||
+        (std::isnan(weightn[i])) || (std::isnan(offsetn[i])) 
         ) {
       sub[i] = 0;
     }
@@ -3109,25 +3054,19 @@ coxfitout phreg_purecpp(
   DataFrame basehaz2;
   std::vector<double> resmart(n);
 
-  //Rcpp::Rcout << "line 3264, [phreg_purecpp] reached the h for loop" << std::endl;
   for (h=0; h<nreps; h++) {
     std::vector<int> q1 = seq_cpp(idx[h], idx[h+1]-1);
     int n1 = static_cast<int>(q1.size());
 
-    std::vector<int> stratum1 = subset_by_idx(stratumn, q1); //stratumn[q1];
-    std::vector<double> time1 = subset_by_idx(timen,q1); //timen[q1];
-    std::vector<double> time21 = subset_by_idx(time2n,q1); //time2n[q1];
-    std::vector<int> event1 = subset_by_idx(eventn,q1); //eventn[q1];
-    std::vector<double> weight1 = subset_by_idx(weightn,q1); //weightn[q1];
-    std::vector<double> offset1 = subset_by_idx(offsetn,q1); //offsetn[q1];
-    std::vector<int> id1 = subset_by_idx(idn,q1); //idn[q1];
+    std::vector<int> stratum1 = subset_by_idx(stratumn, q1); 
+    std::vector<double> time1 = subset_by_idx(timen,q1); 
+    std::vector<double> time21 = subset_by_idx(time2n,q1); 
+    std::vector<int> event1 = subset_by_idx(eventn,q1); 
+    std::vector<double> weight1 = subset_by_idx(weightn,q1); 
+    std::vector<double> offset1 = subset_by_idx(offsetn,q1); 
+    std::vector<int> id1 = subset_by_idx(idn,q1); 
 
-    //NumericMatrix z1(n1,p);
-    //if (p > 0) z1 = subset_matrix_by_row(zn, q1);
     MatrixRM z1 (n1,p);
-    //z1.rows = n1;
-    //z1.cols = p;
-    //z1.a.assign((size_t)n1 * (size_t)p, 0.0);
 
     if (p > 0) {
       for (int ii = 0; ii < n1; ++ii) {
@@ -3156,10 +3095,10 @@ coxfitout phreg_purecpp(
       return stratum1[i] < stratum1[j];
     });
 
-    std::vector<int> stratum1z = subset_by_idx(stratum1,order0); //stratum1[order0];
-    std::vector<double> tstartz = subset_by_idx(tstart,order0); //tstart[order0];
-    std::vector<double> tstopz =  subset_by_idx(tstop,order0); //tstop[order0];
-    std::vector<int> event1z = subset_by_idx(event1,order0); //event1[order0];
+    std::vector<int> stratum1z = subset_by_idx(stratum1,order0); 
+    std::vector<double> tstartz = subset_by_idx(tstart,order0); 
+    std::vector<double> tstopz =  subset_by_idx(tstop,order0);
+    std::vector<int> event1z = subset_by_idx(event1,order0); 
 
     // locate the first observation within each stratum
     std::vector<int> istratum(1,0);
@@ -3198,23 +3137,6 @@ coxfitout phreg_purecpp(
         int idx2 = (int)(std::upper_bound(etime.begin(), etime.end(), tstopz[j])  - etime.begin());
         ignore1z[j] = (idx1 == idx2) ? 1 : 0;
       }
-      /*
-      std::vector<int> q0 = Range(istratum[i], istratum[i+1]-1);
-      NumericVector tstart0 = tstartz[q0];
-      NumericVector tstop0 = tstopz[q0];
-      IntegerVector event0 = event1z[q0];
-      NumericVector etime = tstop0[event0==1];
-      etime = unique(etime);
-      etime.sort();
-      for (j=istratum[i]; j<istratum[i+1]; j++) {
-        int j0 = j-istratum[i];
-        if (index1[j0] == index2[j0]) {
-          ignore1z[j] = 1;
-        } else {
-          ignore1z[j] = 0;
-        }
-      }
-        */
     }
 
     std::vector<int> ignore1(n1);
@@ -3235,14 +3157,14 @@ coxfitout phreg_purecpp(
         (tstop[i] == tstop[j]) && (event1[i] < event1[j]));
     });
 
-    std::vector<int> stratum1a = subset_by_idx(stratum1,order2); //stratum1[order2];
-    std::vector<double> tstarta = subset_by_idx(tstart,order2);  //tstart[order2];
-    std::vector<double> tstopa = subset_by_idx(tstop,order2); //tstop[order2];
-    std::vector<int> event1a = subset_by_idx(event1,order2); //event1[order2];
-    std::vector<double> weight1a = subset_by_idx(weight1,order2); //weight1[order2];
-    std::vector<double> offset1a = subset_by_idx(offset1,order2); //offset1[order2];
-    std::vector<int> id1a = subset_by_idx(id1,order2);  //id1[order2];
-    std::vector<int> ignore1a = subset_by_idx(ignore1,order2);  //ignore1[order2];
+    std::vector<int> stratum1a = subset_by_idx(stratum1,order2); 
+    std::vector<double> tstarta = subset_by_idx(tstart,order2); 
+    std::vector<double> tstopa = subset_by_idx(tstop,order2); 
+    std::vector<int> event1a = subset_by_idx(event1,order2); 
+    std::vector<double> weight1a = subset_by_idx(weight1,order2); 
+    std::vector<double> offset1a = subset_by_idx(offset1,order2); 
+    std::vector<int> id1a = subset_by_idx(id1,order2);  
+    std::vector<int> ignore1a = subset_by_idx(ignore1,order2);  
 
     //part of subset_matrix replacement
     int start = idx[h];
@@ -3302,7 +3224,7 @@ coxfitout phreg_purecpp(
     #endif 
 
     std::vector<double> b(p);
-    MatrixRM vb (p,p); //{p,p,std::vector<double>(p*p)};
+    MatrixRM vb (p,p); 
     if (p > 0) {
       phregLoopOut out;
       std::vector<int> colfit = seq_cpp(0,p-1);
@@ -3477,12 +3399,12 @@ coxfitout phreg_purecpp(
             lb[k] = b[k] - zcrit*seb[k];
             ub[k] = b[k] + zcrit*seb[k];
             double z = b[k]/seb[k];
-            prob[k] = pchisq_cpp(z*z, 1.0, false, false); //R::pchisq(pow(b[k]/seb[k], 2), 1, 0, 0);
+            prob[k] = pchisq_cpp(z*z, 1.0, false, false); 
           } else {
             lb[k] = b[k] - zcrit*rseb[k];
             ub[k] = b[k] + zcrit*rseb[k];
             double z = b[k]/rseb[k];
-            prob[k] = pchisq_cpp(z*z, 1.0, false, false); //R::pchisq(pow(b[k]/rseb[k], 2), 1, 0, 0);
+            prob[k] = pchisq_cpp(z*z, 1.0, false, false); 
           }
           clparm[k] = "Wald";
         }
@@ -3497,7 +3419,7 @@ coxfitout phreg_purecpp(
     }
 
     // log-likelihoods
-    #if TRT_PHREG_ENABLED_FIRTH
+    #if TRT_PHREG_ENABLE_FIRTH
     if (firth) {
       loglik(h,0) = f_pen_llik_2(p, bint, &param);
       loglik(h,1) = f_pen_llik_2(p, b, &param);
@@ -3512,7 +3434,7 @@ coxfitout phreg_purecpp(
 
 
     // estimate baseline hazard
-    #if TRT_ENABLED_BASEHAZ
+    #if TRT_PHREG_ENABLE_BASEHAZ
     if (est_basehaz) {
       basehaz1 = f_basehaz(p, b, &paramx);
 
@@ -3549,7 +3471,7 @@ coxfitout phreg_purecpp(
     #endif
 
     // martingale residuals
-    #if TRT_ENABLED_RESID
+    #if TRT_PHREG_ENABLE_RESID
     if (est_resid) {
       NumericVector resid = f_resmart(p, b, &param);
 
@@ -3562,7 +3484,7 @@ coxfitout phreg_purecpp(
     #endif
   }
 
-  #if TRT_ENABLED_BASEHAZ
+  #if TRT_PHREG_ENABLE_BASEHAZ
   if (est_basehaz) {
     IntegerVector sub = which(!is_na(drep));
     drep = drep[sub];
@@ -3585,261 +3507,6 @@ coxfitout phreg_purecpp(
   output.p = prob0;
   return output;
 
-  //additional parameters below that aren't hard required
+  //add any additional parameters below that aren't hard required
 
-  /*
-  //Rcpp::Rcout << "line 3733, [phreg_purecpp] right before the conversion back into R objects" << std::endl;
-  NumericVector sebeta0_r = wrap(sebeta0);
-  NumericVector beta0_r = wrap(beta0);
-
-  // sumstat conversions
-  IntegerVector nobs_r = wrap(nobs);
-  IntegerVector nevents_r = wrap(nevents);
-  NumericMatrix loglik_r = to_matrix(loglik);
-  NumericVector scoretest_r = wrap(scoretest);
-  IntegerVector niter_r = wrap(niter);
-
-  // parest conversions
-  StringVector par0_r = wrap(par0);
-  NumericMatrix vbeta0_r = to_matrix(vbeta0);
-  NumericVector lb0_r = wrap(lb0);
-  NumericVector ub0_r = wrap(ub0);
-  NumericVector prob0_r = wrap(prob0);
-  StringVector clparm0_r = wrap(clparm0);
-
-  //Rcpp::Rcout << "line 3752, [phreg_purecpp] after conversion" << std::endl;
-  List result;
-  if (p > 0) {
-    NumericVector expbeta0 = exp(beta0_r);
-    NumericVector z0(nreps*p);
-    if (!robust) z0 = beta0_r/sebeta0_r;
-    else {
-      //z0 = beta0_r/rsebeta0; 
-    }
-
-    DataFrame sumstat = List::create(
-      _["n"] = nobs_r,
-      _["nevents"] = nevents_r,
-      _["loglik0"] = loglik_r(_,0),
-      _["loglik1"] = loglik_r(_,1),
-      _["scoretest"] = scoretest_r,
-      _["niter"] = niter_r,
-      _["ties"] = meth,
-      _["p"] = p,
-      _["robust"] = robust,
-      _["firth"] = firth,
-      _["fail"] = fails);
-    
-    #if TRT_ENABLED_FIRTH
-    if (firth) {
-      sumstat.push_back(regloglik(_,0), "loglik0_unpenalized");
-      sumstat.push_back(regloglik(_,1), "loglik1_unpenalized");
-    }
-    #endif
-
-    DataFrame parest;
-    if (!robust) {
-      parest = DataFrame::create(
-        _["param"] = par0_r,
-        _["beta"] = beta0_r,
-        _["sebeta"] = sebeta0_r,
-        _["z"] = z0,
-        _["expbeta"] = expbeta0,
-        _["vbeta"] = vbeta0_r,
-        _["lower"] = lb0_r,
-        _["upper"] = ub0_r,
-        _["p"] = prob0_r,
-        _["method"] = clparm0_r);
-    } else {
-      parest = DataFrame::create(
-        _["param"] = par0,
-        _["beta"] = beta0,
-        _["sebeta"] = rsebeta0,
-        _["z"] = z0,
-        _["expbeta"] = expbeta0,
-        _["vbeta"] = rvbeta0,
-        _["lower"] = lb0,
-        _["upper"] = ub0,
-        _["p"] = prob0,
-        _["method"] = clparm0,
-        _["sebeta_naive"] = sebeta0,
-        _["vbeta_naive"] = vbeta0);
-    }
-
-    #if TRT_PHREG_ENABLE_REPN
-    if (has_rep) {
-      for (i=0; i<p_rep; i++) {
-        String s = rep[i];
-        if (TYPEOF(data[s]) == INTSXP) {
-          IntegerVector repwi = u_rep[s];
-          sumstat.push_back(repwi[rep01-1], s);
-          parest.push_back(repwi[rep0-1], s);
-        } else if (TYPEOF(data[s]) == REALSXP) {
-          NumericVector repwn = u_rep[s];
-          sumstat.push_back(repwn[rep01-1], s);
-          parest.push_back(repwn[rep0-1], s);
-        } else if (TYPEOF(data[rep]) == STRSXP) {
-          StringVector repwc = u_rep[s];
-          sumstat.push_back(repwc[rep01-1], s);
-          parest.push_back(repwc[rep0-1], s);
-        }
-      } 
-    }
-    #endif
-
-    result = List::create(
-      _["sumstat"] = sumstat,
-      _["parest"] = parest);
-    
-    #if TRT_PHREG_ENABLE_BASEHAZ
-    if (est_basehaz) {
-      DataFrame basehaz = DataFrame::create(
-        _["time"] = dtime,
-        _["nrisk"] = dnrisk,
-        _["nevent"] = dnevent,
-        _["ncensor"] = dncensor,
-        _["haz"] = dhaz,
-        _["varhaz"] = dvarhaz,
-        _["gradhaz"] = dgradhaz
-      );
-
-      if (has_stratum) {
-        for (i=0; i<p_stratum; i++) {
-          String s = stratum[i];
-          if (TYPEOF(data[s]) == INTSXP) {
-            IntegerVector stratumwi = u_stratum[s];
-            basehaz.push_back(stratumwi[dstratum-1], s);
-          } else if (TYPEOF(data[s]) == REALSXP) {
-            NumericVector stratumwn = u_stratum[s];
-            basehaz.push_back(stratumwn[dstratum-1], s);
-          } else if (TYPEOF(data[s]) == STRSXP) {
-            StringVector stratumwc = u_stratum[s];
-            basehaz.push_back(stratumwc[dstratum-1], s);
-          }
-        }
-      }
-
-      if (has_rep) {
-        for (i=0; i<p_rep; i++) {
-          String s = rep[i];
-          if (TYPEOF(data[s]) == INTSXP) {
-            IntegerVector repwi = u_rep[s];
-            basehaz.push_back(repwi[drep-1], s);
-          } else if (TYPEOF(data[s]) == REALSXP) {
-            NumericVector repwn = u_rep[s];
-            basehaz.push_back(repwn[drep-1], s);
-          } else if (TYPEOF(data[rep]) == STRSXP) {
-            StringVector repwc = u_rep[s];
-            basehaz.push_back(repwc[drep-1], s);
-          }
-        }
-      }
-      
-
-      result.push_back(basehaz, "basehaz");
-    }
-    #endif
-
-    #if TRT_PHREG_ENABLED_RESID
-    if (est_resid) {
-      result.push_back(resmart, "residuals");
-    }
-    #endif
-  } else {
-    DataFrame sumstat = List::create(
-      _["n"] = nobs_r,
-      _["nevents"] = nevents_r,
-      _["loglik0"] = loglik_r(_,0),
-      _["loglik1"] = loglik_r(_,0),
-      _["scoretest"] = 0,
-      _["niter"] = niter_r,
-      _["ties"] = meth,
-      _["p"] = p,
-      _["robust"] = robust,
-      _["firth"] = firth,
-      _["fail"] = fails);
-    
-    #if TRT_PHREG_ENABLE_FIRTH
-    if (firth) {
-      sumstat.push_back(regloglik(_,0), "loglik0_unpenalized");
-      sumstat.push_back(regloglik(_,1), "loglik1_unpenalized");
-    }
-    #endif
-
-    #if TRT_PHREG_ENABLED_REPN
-    if (has_rep) {
-      for (i=0; i<p_rep; i++) {
-        String s = rep[i];
-        if (TYPEOF(data[s]) == INTSXP) {
-          IntegerVector repwi = u_rep[s];
-          sumstat.push_back(repwi[rep01-1], s);
-        } else if (TYPEOF(data[s]) == REALSXP) {
-          NumericVector repwn = u_rep[s];
-          sumstat.push_back(repwn[rep01-1], s);
-        } else if (TYPEOF(data[rep]) == STRSXP) {
-          StringVector repwc = u_rep[s];
-          sumstat.push_back(repwc[rep01-1], s);
-        }
-      }
-    }
-    #endif 
-
-    result = List::create(
-      _["sumstat"] = sumstat);
-    
-    #if TRT_PHREG_ENABLE_BASEHAZ
-    if (est_basehaz) {
-      DataFrame basehaz = DataFrame::create(
-        _["time"] = dtime,
-        _["nrisk"] = dnrisk,
-        _["nevent"] = dnevent,
-        _["ncensor"] = dncensor,
-        _["haz"] = dhaz,
-        _["varhaz"] = dvarhaz
-      );
-
-      if (has_stratum) {
-        for (i=0; i<p_stratum; i++) {
-          String s = stratum[i];
-          if (TYPEOF(data[s]) == INTSXP) {
-            IntegerVector stratumwi = u_stratum[s];
-            basehaz.push_back(stratumwi[dstratum-1], s);
-          } else if (TYPEOF(data[s]) == REALSXP) {
-            NumericVector stratumwn = u_stratum[s];
-            basehaz.push_back(stratumwn[dstratum-1], s);
-          } else if (TYPEOF(data[s]) == STRSXP) {
-            StringVector stratumwc = u_stratum[s];
-            basehaz.push_back(stratumwc[dstratum-1], s);
-          }
-        }
-      }
-
-      if (has_rep) {
-        for (i=0; i<p_rep; i++) {
-          String s = rep[i];
-          if (TYPEOF(data[s]) == INTSXP) {
-            IntegerVector repwi = u_rep[s];
-            basehaz.push_back(repwi[drep-1], s);
-          } else if (TYPEOF(data[s]) == REALSXP) {
-            NumericVector repwn = u_rep[s];
-            basehaz.push_back(repwn[drep-1], s);
-          } else if (TYPEOF(data[rep]) == STRSXP) {
-            StringVector repwc = u_rep[s];
-            basehaz.push_back(repwc[drep-1], s);
-          }
-        }
-      }
-
-      result.push_back(basehaz, "basehaz");
-    }
-    #endif 
-
-    #if TRT_PHREG_ENABLE_RESID
-    if (est_resid) {
-      result.push_back(resmart, "residuals");
-    }
-    #endif
-  }
-
-  return result;*/
 }

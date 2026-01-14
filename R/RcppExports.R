@@ -823,8 +823,8 @@ tsesimpcpp <- function(data, id = "id", stratum = "", time = "time", event = "ev
     .Call(`_trtswitch_tsesimpcpp`, data, id, stratum, time, event, treat, censor_time, pd, pd_time, swtrt, swtrt_time, base_cov, base2_cov, aft_dist, strata_main_effect_only, recensor, admin_recensor_only, swtrt_control_only, alpha, ties, offset, boot, n_boot, seed)
 }
 
-tsesimpcpp_mt <- function(data, id = "id", stratum = "", time = "time", event = "event", treat = "treat", censor_time = "censor_time", pd = "pd", pd_time = "pd_time", swtrt = "swtrt", swtrt_time = "swtrt_time", base_cov = "", base2_cov = "", aft_dist = "weibull", strata_main_effect_only = 1L, recensor = 1L, admin_recensor_only = 1L, swtrt_control_only = 1L, alpha = 0.05, ties = "efron", offset = 1, boot = 1L, n_boot = 1000L, seed = NA_integer_) {
-    .Call(`_trtswitch_tsesimpcpp_mt`, data, id, stratum, time, event, treat, censor_time, pd, pd_time, swtrt, swtrt_time, base_cov, base2_cov, aft_dist, strata_main_effect_only, recensor, admin_recensor_only, swtrt_control_only, alpha, ties, offset, boot, n_boot, seed)
+tsesimpcpp_mt <- function(data, id = "id", stratum = "", time = "time", event = "event", treat = "treat", censor_time = "censor_time", pd = "pd", pd_time = "pd_time", swtrt = "swtrt", swtrt_time = "swtrt_time", base_cov = "", base2_cov = "", aft_dist = "weibull", strata_main_effect_only = 1L, recensor = 1L, admin_recensor_only = 1L, swtrt_control_only = 1L, alpha = 0.05, ties = "efron", offset = 1, boot = 1L, n_boot = 1000L, seed = NA_integer_, threads = 1L) {
+    .Call(`_trtswitch_tsesimpcpp_mt`, data, id, stratum, time, event, treat, censor_time, pd, pd_time, swtrt, swtrt_time, base_cov, base2_cov, aft_dist, strata_main_effect_only, recensor, admin_recensor_only, swtrt_control_only, alpha, ties, offset, boot, n_boot, seed, threads)
 }
 
 #' @title Simulate Data for Treatment Switching

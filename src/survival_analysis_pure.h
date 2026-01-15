@@ -13,32 +13,6 @@ struct RepResult {
   int fail = 0;
 };
 
-// inputs into lambda f() turned into -> multi-thread function :) 
-// bootstrap function call inputs
-struct BaseInputs {
-  int n = 0;
-  int p = 0;     // baseline cov count for Cox
-  int p2 = 0;    // baseline cov count for AFT block
-  bool has_stratum = false;
-  int p_stratum = 0;
-
-  // core columns (std::vector only)
-  std::vector<int> id;
-  std::vector<int> stratum;      // "ustratum" indexing
-  std::vector<double> time;
-  std::vector<int> event;
-  std::vector<int> treat;
-  std::vector<double> censor_time;
-  std::vector<int> pd;
-  std::vector<double> pd_time;
-  std::vector<int> swtrt;
-  std::vector<double> swtrt_time;
-
-  // covariates as C++ row-major matrix (thread-safe)
-  MatrixRM zb;        // n x p
-  MatrixRM zb_aft;    // n x (q+p2) or whatever you currently use
-};
-
 // lifereg structs
  
 // input for lifereg_purecpp
@@ -72,6 +46,8 @@ struct liferegloopresult{
 struct liferegOut{
   bool fail;
 
+  // basically all we need for our purposes xd 
+
   // sum stat
   //add rest if needed
 
@@ -80,18 +56,6 @@ struct liferegOut{
   std::vector<double> sebeta; //rsebeta0
   // add rest if needed
 };
-
-/*
-// Note: Planning to replace this because this does way more work than needed when we can use pointers for a flat array and pass a view or just & 
-Holds exactly what bygroup(...) returned in Rcpp:
-//  - index[i] = group ID (1…G) for row i
-//  - lookup[g] = vector of all row-indices i where index[i]==g
-*/
-struct group_index {
-  std::vector<int> index;
-  std::vector<std::vector<int>> lookup;
-};
-
 
 // phreg structs
 
@@ -175,22 +139,30 @@ struct coxfitout {
   std::vector<double> p;        // size p (optional)
 };
 
-// list of functions headings below
+// list of functions and other struct headings below
+
+/*
+// Note: Planning to replace this because this does way more work than needed when we can use pointers for a flat array and pass a view or just & 
+Holds exactly what bygroup(...) returned in Rcpp:
+//  - index[i] = group ID (1…G) for row i
+//  - lookup[g] = vector of all row-indices i where index[i]==g
+*/
+struct group_index {
+  std::vector<int> index;
+  std::vector<std::vector<int>> lookup;
+};
+
 
 group_index group_by(
   const std::vector<std::string>& factor
 );
 
-double f_llik_2_cpp(int p, const std::vector<double>& par, const void *ex);
+double f_llik_2_cpp(
+  int p, 
+  const std::vector<double>& par, 
+  const void *ex
+);
 
-//bool has_col_aft(const trial_data& d, const std::string& col_name);
-
-//void safety_check_col_aft(const trial_data& d);
-
-//bool has_variable(
-//  const trial_data& d, 
-//  const std::string& var_name
-//);
 
 std::vector<double> f_score_1_cpp(
   int p, 

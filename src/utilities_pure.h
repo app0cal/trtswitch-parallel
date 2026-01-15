@@ -113,18 +113,6 @@ std::vector<int> seq_cpp(
     int start, 
     int end
 );
-/*
-template<typename T>
-void reorder(
-    std::vector<T>& vec, 
-    const std::vector<int>& order
-);
-*/
-/*
-std::vector<std::vector<double>> subset_matrix_by_row_cpp(
-    const std::vector<std::vector<double>>& mat,
-    const std::vector<int>& order
-); */
 
 template<typename T>
 void reorder(std::vector<T>& vec, const std::vector<int>& order) {
@@ -133,37 +121,6 @@ void reorder(std::vector<T>& vec, const std::vector<int>& order) {
     vec[i] = old[order[i]];
   }
 }
-/*
-template<typename Container>
-std::vector<int> which_true(
-    const Container& flags
-);
-
-template<class T1>
-std::vector<int> which_single_cpp(
-    const std::vector<T1>& a, 
-    const T1& val1
-);
-
-template<class T1, class T2>
-std::vector<int> which_dual_cpp(
-    const std::vector<T1>& a,
-    const T1& val1,
-    const std::vector<T2>& b, 
-    const T2& val2
-);
-
-
-template<typename T>
-std::vector<T> subset_by_idx(
-    const std::vector<T>& vec,
-    const std::vector<int>& idx
-);
-*/
-//introduced single and dual which functions to avoid Rcpp API calls
-// single is for single vector, dual is for two vectors
-// this introduces a more generic way to find indices of elements in vectors
-// if three or more vectors are needed, we can extend this further 
 
 //use this for bool vectors and integer vectors w only 1's and 0's representing true/false
 template<typename Container>

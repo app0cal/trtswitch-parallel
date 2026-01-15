@@ -59,7 +59,7 @@ invisible(do.call(trtswitch::tsesimp_mt, tmp))
 
 t_mt1 <- time_one(do.call(trtswitch::tsesimp_mt, tmp))
 
-tmp8 <- common_args; tmp8$threads <- 8L
+tmp8 <- common_args; tmp8$threads <- 12L
 t_mt8 <- time_one(do.call(trtswitch::tsesimp_mt, tmp8))
 
 # --- CRAN official timing in a clean process ---

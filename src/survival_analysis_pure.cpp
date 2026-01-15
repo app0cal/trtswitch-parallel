@@ -10,11 +10,9 @@ using namespace Rcpp;
 //using namespace Rcpp;
 
 
-// -----------------------------------------------------------------------------
 // Pure-C++ equivalent of Rcpp::bygroup(data, factor):
 //   - factor: length-n vector of group labels (e.g. rep or stratum)
 //   - returns GroupIndex with index[] & lookup[]
-// -----------------------------------------------------------------------------
 group_index group_by(const std::vector<std::string>& factor) {
   int n = static_cast<int>(factor.size());
   group_index res;
@@ -48,37 +46,6 @@ group_index group_by(const std::vector<std::string>& factor) {
   return res;
 }
 
-//this has variable functoin will depend on each function that uses it, so it might not be the same as it 
-// would for liferegrcpp helper function 
-/* hard coding this was a very bad idea do NOT do this
-bool has_variable(const trial_data& d, const std::string& var_name) {
-  if (var_name == "time")     return !d.pps.empty();
-  if (var_name == "event")     return true;
-  if (var_name == "swtrt")     return true;
-  if (var_name == "aft")       return true;  // or check individual cov names elsewhere
-
-  for (const auto& name : d.aft_names) {
-    if (var_name == name) return true;
-  }
-  return false;
-}
-*/
-/*
-inline const std::vector<double>& get_numeric_column(const trial_data& d, const std::string& col_name) {
-  if(col_name == "pps"){
-    return d.pps;
-  }
-
-  for (size_t i = 0; i < d.aft_names.size(); ++i) {
-    if (col_name == d.aft_names[i]) {
-      return d.aft[i];
-    }
-  }
-
-  throw std::runtime_error("Variable not found: " + col_name);
-}
-*/
-
 int find_aft_index(const trial_data& d, const std::string& col_name) {
   for (size_t i = 0; i < d.aft_names.size(); ++i) {
     if (d.aft_names[i] == col_name) {
@@ -109,43 +76,6 @@ NumericMatrix to_matrix(const std::vector<std::vector<double>>& matrix) {
     }
   return out;
 } 
-
-/*
-bool has_col_aft(const trial_data& d, const std::string& col_name) {
-  if (col_name == "pps")     return !d.pps.empty();
-  if (col_name == "event")    return !d.event.empty() && d.event.size() == d.pps.size();
-  if (col_name == "swtrt")    return !d.swtrt.empty() && d.swtrt.size() == d.pps.size();
-  
-  //col name check
-  int y = find_aft_index(d, col_name);
-  if (y != -1 && d.aft[y].size() == d.pps.size()) {
-    return true;
-  }
-  return false;
-}
-
-void safety_check_col_aft(const trial_data& d) {
-  if (!has_col_aft(d, "pps"))     throw std::runtime_error("liferegcpp: Missing 'pps' column in trial_data");
-  if (!has_col_aft(d, "event"))   throw std::runtime_error("liferegcpp: Missing 'event' column in trial_data");
-  if (!has_col_aft(d, "swtrt"))   throw std::runtime_error("liferegcpp: Missing 'swtrt' column in trial_data");
-  if (d.aft_names.size() != d.aft.size()) {
-    throw std::runtime_error("liferegcpp: Mismatch between aft_names and aft data size");
-  }
-  for (size_t j = 0; j < d.aft_names.size(); ++j) {
-    if (d.aft[j].size() != d.pps.size()) {
-      throw std::runtime_error("liferegcpp: Mismatch between aft column size and pps size for column: " + d.aft_names[j]);
-    }
-  }
-}
-*/
-
- 
-
-/*
-//
-//
-//
-*/
 
 // score vector
 std::vector<double> f_score_1_cpp(int p, std::vector<double> par, void *ex) {
@@ -1988,12 +1918,12 @@ liferegOut lifereg_purecpp(
 
     
     param.dist   = dist1;
-    param.strata = std::move(stratum1);
-    param.tstart = std::move(tstart);
-    param.tstop  = std::move(tstop);
-    param.status = std::move(status);
-    param.weight = std::move(weight1);
-    param.offset = std::move(offset1);
+    param.strata = stratum1; //std::move(stratum1);
+    param.tstart = tstart; //std::move(tstart);
+    param.tstop  = tstop; //std::move(tstop);
+    param.status = status;//std::move(status);
+    param.weight = weight1; //std::move(weight1);
+    param.offset = offset1; //std::move(offset1);
     param.nstrata = nstrata;
 
     param.zbase = &zn;
@@ -2657,8 +2587,6 @@ phregLoopOut phregloop_cpp(int p, const std::vector<double>& par, void *ex,
   int i, j, iter, halving = 0;
   bool fail;
 
-  const RowIndexViewView& z = param->z;
-
   double toler = 1e-12;
   std::vector<double> beta(p), newbeta(p);
   double loglik, newlk = 0;
@@ -2783,9 +2711,9 @@ phregLoopOut phregloop_cpp(int p, const std::vector<double>& par, void *ex,
   }
 
   phregLoopOut out;
-  out.coef   = std::move(newbeta);
+  out.coef   = newbeta; 
   out.iter   = iter;
-  out.var    = std::move(var);
+  out.var    = var; 
   out.loglik = newlk;
   out.fail   = fail;
   return out;
@@ -2820,7 +2748,8 @@ coxfitout phreg_purecpp(
     //error handling needed
   }
 
-  bool has_rep = false;
+  // never used so commented out for now
+  //bool has_rep = false;
   std::vector<int> repn(n,1);
 
   bool has_stratum;
@@ -3047,8 +2976,8 @@ coxfitout phreg_purecpp(
   std::vector<double> dtime(N), dnrisk(N), dnevent(N), dncensor(N);
   std::vector<double> dhaz(N), dvarhaz(N);
   std::vector<std::vector<double>> dgradhaz(N, std::vector<double>(p));
-  int n0 = 0;
-  int bign0 = 0;
+  //int n0 = 0;
+  //int bign0 = 0;
   double toler = 1e-12;
 
   DataFrame basehaz2;

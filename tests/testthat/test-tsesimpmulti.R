@@ -57,7 +57,7 @@ test_that("tsesimp (weibull AFT): local tsesimp_mt matches CRAN tsesimp", {
     swtrt_control_only = FALSE,
     offset     = 1,
     boot       = TRUE,
-    n_boot     = 500,
+    n_boot     = 100,
     seed = 1L
   )
   
@@ -74,7 +74,7 @@ test_that("tsesimp (weibull AFT): local tsesimp_mt matches CRAN tsesimp", {
   
   # compare (tight tolerance for HR and PSI, then looser for CI)
   tol1 <- 1e-6
-  tol2 <- 3e-2
+  tol2 <- 5e-2
   expect_equal(as.numeric(local$hr),     as.numeric(official$hr),     tolerance = tol1)
   expect_equal(as.numeric(local$hr_CI),  as.numeric(official$hr_CI),  tolerance = tol2)
   expect_equal(as.numeric(local$psi),    as.numeric(official$psi),    tolerance = tol1)

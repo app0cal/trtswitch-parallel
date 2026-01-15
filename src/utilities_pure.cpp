@@ -25,16 +25,11 @@ to avoid Rcpp API calls and make them usable in pure C++.
 The main idea is to keep the pipeline of data processing similar to the original Rcpp code
 */
 
-//TO DO:
-//double check code to have size_t i = 0, as loop because we can't compare a integer with a size_t for example
-//vector length is unsigned integers so large vectors can cause issues with signed integers
-//also will probably rename xxxxx_cpp to xxxxx_ in the future, but I want to avoid re writing the same name for functions
 
 std::vector<int>
 compose_block_rows(const std::vector<int>& row_idx,
                    int start,                 // idx[h]
-                   const std::vector<int>& local_order) // order2 / order2x
-{
+                   const std::vector<int>& local_order){
   std::vector<int> out(local_order.size());
   for (size_t k = 0; k < local_order.size(); ++k) {
     out[k] = row_idx[start + local_order[k]];
@@ -108,79 +103,6 @@ namespace details_pure {
   }
 } // namespace details_pure
 using namespace details_pure;
-
-// creates a vector that sequentially adds from int start to end
-std::vector<int> seq_cpp(int start, int end) {
-  if(end < start) return {};
-  int len = end - start + 1;
-  std::vector<int> v;
-  v.reserve(len);
-  for (int i = 0; i < len; ++i) {
-    v.push_back(start + i);
-  }
-  return v;
-}
-
-// grabs however many are true inside of a bool vector
-int sum_bool_cpp(const std::vector<bool>& vec) {
-  int total = 0;
-  for (size_t i = 0; i < vec.size(); ++i) {
-    if(vec[i]) {
-      total++;
-    }
-  }
-  return total;
-}
-
-// calculates the mean in a vector
-double mean_cpp(const std::vector<double>& vec) {
-    if(vec.empty()) {
-        throw std::invalid_argument("Mean is not defined for empty vector");
-    }
-    double total = 0.0;
-    for (const auto& val : vec) {
-        total += val;
-    }
-    return total / static_cast<double>(vec.size());
-}
-
-// sums the values in a double vector
-double sumdouble_cpp(const std::vector<double>& vec) {
-    double total = 0.0;
-    for (const auto& val : vec) {
-        total += val;
-    }
-    return total;
-}
-
-// sums the values in a int vector
-int sumint_cpp(const std::vector<int>& vec) {
-    double total = 0.0;
-    for (const auto& val : vec) {
-        total += val;
-    }
-    return total;
-}
-
-// gets the standard deviation in a vector
-double sd_cpp(const std::vector<double>& vec) {
-    if(vec.empty()) {
-        throw std::invalid_argument("Standard deviation is not defined for empty vector");
-    }
-    if (vec.size() < 2) {
-        throw std::invalid_argument("Standard deviation is not defined for size < 2");
-    }
-    if(vec.size() == 2) {
-        return std::abs(vec[0] - vec[1]) / std::sqrt(2.0); // special case for two elements
-    }
-    double m = mean_cpp(vec);
-    double sqsum = 0.0;
-    for (const auto& val : vec) {
-        double d = val - m;
-        sqsum += d * d;
-    }
-    return std::sqrt(sqsum / static_cast<double>(vec.size() - 1));
-}
 
 //bottom few functions are rewritten from R::(FUNCTION_NAME) to use vectors instead but R supports it's own math library so we add Boost math equivalents to help us with certain tougher functions to recreate like
 //added type swapping to boost accuracy in the lower decimal places for extreme values
@@ -401,6 +323,78 @@ double qchisq_cpp(double p, double df, bool lower_tail, bool log_p){
   }
 }
 
+// creates a vector that sequentially adds from int start to end
+std::vector<int> seq_cpp(int start, int end) {
+  if(end < start) return {};
+  int len = end - start + 1;
+  std::vector<int> v;
+  v.reserve(len);
+  for (int i = 0; i < len; ++i) {
+    v.push_back(start + i);
+  }
+  return v;
+}
+
+// grabs however many are true inside of a bool vector
+int sum_bool_cpp(const std::vector<bool>& vec) {
+  int total = 0;
+  for (size_t i = 0; i < vec.size(); ++i) {
+    if(vec[i]) {
+      total++;
+    }
+  }
+  return total;
+}
+
+// calculates the mean in a vector
+double mean_cpp(const std::vector<double>& vec) {
+    if(vec.empty()) {
+        throw std::invalid_argument("Mean is not defined for empty vector");
+    }
+    double total = 0.0;
+    for (const auto& val : vec) {
+        total += val;
+    }
+    return total / static_cast<double>(vec.size());
+}
+
+// sums the values in a double vector
+double sumdouble_cpp(const std::vector<double>& vec) {
+    double total = 0.0;
+    for (const auto& val : vec) {
+        total += val;
+    }
+    return total;
+}
+
+// sums the values in a int vector
+int sumint_cpp(const std::vector<int>& vec) {
+    double total = 0.0;
+    for (const auto& val : vec) {
+        total += val;
+    }
+    return total;
+}
+
+// gets the standard deviation in a vector
+double sd_cpp(const std::vector<double>& vec) {
+    if(vec.empty()) {
+        throw std::invalid_argument("Standard deviation is not defined for empty vector");
+    }
+    if (vec.size() < 2) {
+        throw std::invalid_argument("Standard deviation is not defined for size < 2");
+    }
+    if(vec.size() == 2) {
+        return std::abs(vec[0] - vec[1]) / std::sqrt(2.0); // special case for two elements
+    }
+    double m = mean_cpp(vec);
+    double sqsum = 0.0;
+    for (const auto& val : vec) {
+        double d = val - m;
+        sqsum += d * d;
+    }
+    return std::sqrt(sqsum / static_cast<double>(vec.size() - 1));
+}
 
 // bottom three are copies of the copies of the survival package from utilties.cpp but made to work with std::vectors
 // The following three utilities functions are from the survival package

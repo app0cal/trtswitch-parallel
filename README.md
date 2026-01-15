@@ -59,7 +59,7 @@ to extend the pipeline (e.g. adding more covariates) without introducing hidden 
 
 ## Impact
 The pure C++ refactor yields the following benefits:
-- Parallel speedup: On a dataset with 10,000 observations and 500 bootstrap replicates, the multithreaded version reduces wall-clock runtime by roughly 6x on a 12 core machine compared to the original serial Rcpp implementation. Performance gains from both multi threading
+- Parallel speedup: On a dataset with 10,000 observations and 500 bootstrap replicates, the multithreaded version reduces wall-clock runtime by roughly 4x  compared to the original serial Rcpp implementation. Performance gains from both multi threading
 and more efficent memory accessing w the views and flat matrix.
 - Numerical Parity: Unit tests confirm that the point estimates for psi and HR match the CRAN implementation within 1e-6 tolerance, while the bootstrap confidence interval were identitcal in a larger tolerance.
 - Better maintainability: With Rcpp dependancies removed from the inner loop, the code seperates clearly into C++ numerical code and a R wrapper. Future optimizations become much easier with this!

@@ -12,8 +12,8 @@
 --- 
 ## NOTE: 
 Link to the official version: https://cran.r-project.org/web/packages/trtswitch/index.html <br>
-This was part of a software engineering internship where I was helping the author of the original trtswitch package library refactor some of the functions. This repository was part of a sprint to complete tsesimp.cpp's refacotring into pure C++ to allow use 
-for multi threading. As of version 0.2.3 of trtswitch it has adopted some of my suggestions and improved upon them so this is an outdated build, but this is meant to serve documentation for the how and why regarding the projects refactorization. 
+This was part of a software engineering internship where I was helping the author of the original trtswitch package library refactor some of the functions. This repository was part of a sprint to complete tsesimp.cpp's refactoring into native C++ to allow 
+for multi threading (because Rcpp is single-threaded). As of version 0.2.3 of trtswitch it has adopted some of my suggestions and improved upon them so this is an outdated build, but this is meant to serve documentation for the how and why regarding the projects refactorization. 
 
 ## Main Overview
 In survival analysis patients in a control arm can switch treatements at progression or at some crossover time. This can skew the results of the HR value (for non statistics people, this basically is very bad), it implements an accelerated failure time (AFT) model 
